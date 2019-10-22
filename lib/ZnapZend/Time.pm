@@ -45,21 +45,22 @@ has scrubTimeFilter => sub { qr/[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d
 has scrubTimeFormat => sub { q{%b %d %H:%M:%S %Y} };
 has timeWarp        => sub { undef };
 
-my $intervalToTimestamp = sub {
+### private methods ###
+our $intervalToTimestamp = sub {
     my $time = shift;
     my $interval = shift;
 
     return $interval * (int($time / $interval) + 1);
 };
 
-my $timeToTimestamp = sub {
+our $timeToTimestamp = sub {
     my $self = shift;
     my ($time, $unit) = @_;
 
     return $time * $self->unitFactors->{$unit};
 };
 
-my $getSnapshotTimestamp = sub {
+our $getSnapshotTimestamp = sub {
     my $self = shift;
     my $snapshot = shift;
     my $timeFormat = shift;

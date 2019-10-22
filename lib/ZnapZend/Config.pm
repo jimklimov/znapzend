@@ -13,7 +13,7 @@ has rootExec => sub { q{} };
 has timeWarp => sub { undef };
 has zLog => sub { Mojo::Exception->throw('zLog must be specified at creation time!') };
 
-#mandatory properties
+### mandatory properties ###
 has mandProperties => sub {
     {
         enabled       => 'on|off',
@@ -39,10 +39,12 @@ has time => sub { ZnapZend::Time->new(timeWarp=>shift->timeWarp); };
 has backupSets => sub { [] };
 
 ### private functions ###
-my $splitHostDataSet = sub { return ($_[0] =~ /^(?:([^:\/]+):)?([^:]+|[^:@]+\@.+)$/); };
+our $splitHostDataSet = sub {
+    return ($_[0] =~ /^(?:([^:\/]+):)?([^:]+|[^:@]+\@.+)$/);
+};
 
 ### private methods ###
-my $checkBackupPlan = sub {
+our $checkBackupPlan = sub {
     my $self = shift;
     my $backupPlan = lc shift;
     my $returnBackupPlan;
@@ -71,7 +73,7 @@ my $checkBackupPlan = sub {
     return $returnBackupPlan;
 };
 
-my $checkBackupSets = sub {
+our $checkBackupSets = sub {
     my $self = shift;
 
     for my $backupSet (@{$self->backupSets}){
@@ -161,7 +163,7 @@ my $checkBackupSets = sub {
     return 1;
 };
 
-my $getBackupSet = sub {
+our $getBackupSet = sub {
     my $self = shift;
     my $enabledOnly = shift;
     # The recursion setting allows to find datasets under the named one

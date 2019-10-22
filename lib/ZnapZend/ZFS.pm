@@ -26,10 +26,15 @@ has zLog            => sub { Mojo::Exception->throw('zLog must be specified at c
 has priv            => sub { my $self = shift; [$self->rootExec ? split(/ /, $self->rootExec) : ()] };
 
 ### private functions ###
-my $splitHostDataSet     = sub { return ($_[0] =~ /^(?:([^:\/]+):)?([^:]+|[^:@]+\@.+)$/); };
-my $splitDataSetSnapshot = sub { return ($_[0] =~ /^([^\@]+)\@([^\@]+)$/); };
+our $splitHostDataSet     = sub {
+    return ($_[0] =~ /^(?:([^:\/]+):)?([^:]+|[^:@]+\@.+)$/);
+};
 
-my $shellQuote = sub {
+our $splitDataSetSnapshot = sub {
+    return ($_[0] =~ /^([^\@]+)\@([^\@]+)$/);
+};
+
+our $shellQuote = sub {
     my @return;
 
     for my $group (@_){
@@ -43,7 +48,8 @@ my $shellQuote = sub {
     return join '|', @return;
 };
 
-my $buildRemoteRefArray = sub {
+### private methods ###
+our $buildRemoteRefArray = sub {
     my $self = shift;
     my $remote = shift;
 
@@ -54,14 +60,14 @@ my $buildRemoteRefArray = sub {
     return @_;
 };
 
-my $buildRemote = sub {
+our $buildRemote = sub {
     my $self = shift;
     my @list = $self->$buildRemoteRefArray(@_);
 
     return @{$list[0]};
 };
 
-my $scrubZpool = sub {
+our $scrubZpool = sub {
     my $self = shift;
     my $startstop = shift;
     my $zpool = shift;

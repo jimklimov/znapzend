@@ -99,7 +99,8 @@ has zLog => sub {
     return $log;
 };
 
-my $killThemAll  = sub {
+### private methods ###
+our $killThemAll  = sub {
     my $self = shift;
 
     $self->zLog->info("terminating znapzend (PID=$$) ...");
@@ -124,7 +125,7 @@ my $killThemAll  = sub {
     exit 0;
 };
 
-my $refreshBackupPlans = sub {
+our $refreshBackupPlans = sub {
     my $self = shift;
     my $recurse = shift;
     my $dataSet = shift;
@@ -213,7 +214,7 @@ my $refreshBackupPlans = sub {
     }
 };
 
-my $sendRecvCleanup = sub {
+our $sendRecvCleanup = sub {
     my $self = shift;
     my $backupSet = shift;
     my $timeStamp = shift;
@@ -479,7 +480,7 @@ my $sendRecvCleanup = sub {
     return 1;
 };
 
-my $createSnapshot = sub {
+our $createSnapshot = sub {
     my $self = shift;
     my $backupSet = shift;
     my $timeStamp = shift;
@@ -573,7 +574,7 @@ my $createSnapshot = sub {
     return 1;
 };
 
-my $sendWorker = sub {
+our $sendWorker = sub {
     my $self = shift;
     my $backupSet = shift;
     my $timeStamp = shift;
@@ -624,7 +625,7 @@ my $sendWorker = sub {
     );
 };
 
-my $snapWorker = sub {
+our $snapWorker = sub {
     my $self = shift;
     my $backupSet = shift;
     my $timeStamp = shift;
@@ -684,7 +685,7 @@ my $snapWorker = sub {
     );
 };
 
-my $createWorkers = sub {
+our $createWorkers = sub {
     my $self = shift;
 
     #create a timer for each backup set
@@ -734,7 +735,7 @@ my $createWorkers = sub {
 
 };
 
-my $daemonize = sub {
+our $daemonize = sub {
     my $self = shift;
     my $pidFile = $self->pidfile || $self->defaultPidFile;
 
@@ -783,6 +784,7 @@ my $daemonize = sub {
     }
 };
 
+### public methods ###
 sub start {
     my $self = shift;
 
