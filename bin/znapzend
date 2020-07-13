@@ -15,7 +15,7 @@ sub main {
     GetOptions($opts, qw(help|h man debug|d noaction|n nodestroy features=s),
         qw(sudo pfexec rootExec=s daemonize pidfile=s logto=s loglevel=s),
         qw(runonce:s connectTimeout=s timeWarp=i nodelay autoCreation version),
-        qw(skipOnPreSnapCmdFail skipOnPreSendCmdFail recursive|r inherited)) or exit 1;
+        qw(skipOnPreSnapCmdFail skipOnPreSendCmdFail recursive|r inherited since=s)) or exit 1;
 
     $opts->{version} && do {
         print "znapzend version $VERSION\n";
@@ -105,6 +105,7 @@ B<znapzend> [I<options>...]
  --runonce=[x]          run one round on the optionally provided dataset
  -r,--recursive         recurse from the given "run-once" dataset
  --inherited            allow "run-once" on dataset which only inherits a plan
+ --since=x              allow to consider a non-automatic common snapshot "x"
  --features=x           comma separated list of features to be enabled
  --rootExec=x           exec zfs with this command to obtain root privileges (sudo or pfexec)
  --connectTimeout=x     sets the ConnectTimeout for ssh commands
@@ -278,6 +279,21 @@ Neither of these runs should do anything, because all datasets involved
 (including those found by a recursive walk) under I<usbbackup> have neither
 a local definition of a backup plan, nor one inherited from a local definition.
 
+=item B<--since>=x
+
+Enables to see a snapshot named I<x> in the history of the source and target
+pools, which should be a common snapshot present on both, and may be their
+newest common snapshot (otherwise blocking the sync as something that needs
+to be removed for a full auto-creation replication and/or a usual replication).
+If the target dataset does not have this named snapshot, but the otherwise
+discovered history of automatic snapshots allows to include it into the usual
+replication, it will be sent (and a newer automatically-named snapshot would
+be made and sent). In other cases, it is up to the systems administrator to
+make the original systems data consistent with that on their remote ZFS pool.
+
+Example:
+
+  znapzend --runonce=usbbackup/snapshots --since=20200101-01-finallyMystableSetup
 
 =item B<--features>=I<feature1>,I<feature2>,...
 

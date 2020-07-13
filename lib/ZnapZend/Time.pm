@@ -155,6 +155,8 @@ sub getSnapshotsToDestroy {
     my $timePlan = shift;
     my $timeFormat = shift;
     my $time = $_[0] || $self->getTimestamp($self->useUTC($timeFormat));
+    my $keepPattern = $_[1];
+    if ( !defined($keepPattern) || ! $keepPattern ) { $keepPattern = "" ; }
     my %timeslots;
     my @toDestroy;
 
@@ -162,6 +164,12 @@ sub getSnapshotsToDestroy {
     my $maxAge = (sort { $a<=>$b } keys %$timePlan)[-1];
 
     for my $snapshot (@$snapshots){
+        if ($keepPattern ne "") {
+            if ($snapshot =~ $keepPattern) {
+                next;
+            }
+        }
+
         #get snapshot age
         my $snapshotTimestamp = $self->$getSnapshotTimestamp($snapshot, $timeFormat);
         my $snapshotAge = $time - $snapshotTimestamp;
