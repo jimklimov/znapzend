@@ -229,6 +229,8 @@ While basic sanity checks are done, it is up to the caller to specify a
 correct string value according to the rules of their ZFS version, and to
 take care that it is unique (no snapshots with such suffix already exist).
 
+See also B<--since>=I<snapsuffix>
+
 =item B<-r>, B<--recursive>
 
 when backing up a particular dataset with B<--runonce>=[I<dataset>], do not
@@ -334,17 +336,28 @@ Neither of these runs should do anything, because all datasets involved
 (including those found by a recursive walk) under I<usbbackup> have neither
 a local definition of a backup plan, nor one inherited from a local definition.
 
-=item B<--since>=x
+=item B<--since>=I<snapsuffix>
 
-Enables to see a snapshot named I<x> in the history of the source and target
-pools, which should be a common snapshot present on both, and may be their
-newest common snapshot (otherwise blocking the sync as something that needs
-to be removed for a full auto-creation replication and/or a usual replication).
+Enables to see a snapshot named I<snapsuffix> in the history of the dataset
+under source and target pools, which should be a common snapshot present on
+both (or only on the source pool), and may be their newest common snapshot
+(that would otherwise be blocking the sync as something that needs to be
+removed for a full auto-creation replication and/or a usual replication).
+
 If the target dataset does not have this named snapshot, but the otherwise
 discovered history of automatic snapshots allows to include it into the usual
 replication, it will be sent (and a newer automatically-named snapshot would
 be made and sent). In other cases, it is up to the systems administrator to
 make the original systems data consistent with that on their remote ZFS pool.
+
+Unlike the B<--forcedSnapshotSuffix>=I<snapsuffix>, this option does not
+define how the new snapshot made during this run would be called (it would
+be named by common timestamp-based pattern to not get in the way of subsequent
+regular replications).
+
+The dataset name provided in this argument will never be removed during this
+run-once (even if it matches the configured znapzend timestamp-based snapshot
+naming pattern and is old enough to rotate away in other circumstances).
 
 Example:
 
