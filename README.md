@@ -1,9 +1,11 @@
-ZnapZend 0.19.0
-===============
+ZnapZend
+========
 
-[![Build Status](https://travis-ci.org/oetiker/znapzend.svg?branch=master)](https://travis-ci.org/oetiker/znapzend)
+[![Build](https://img.shields.io/github/workflow/status/oetiker/znapzend/Release)](https://github.com/oetiker/znapzend/actions?query=workflow%3ABuild)
 [![Coverage Status](https://img.shields.io/coveralls/oetiker/znapzend.svg)](https://coveralls.io/r/oetiker/znapzend?branch=master)
 [![Gitter](https://badges.gitter.im/oetiker/znapzend.svg)](https://gitter.im/oetiker/znapzend)
+[![Releases](https://img.shields.io/github/v/release/oetiker/znapzend)](https://github.com/oetiker/znapzend/releases)
+[![Docker images](https://img.shields.io/docker/pulls/oetiker/znapzend)](https://hub.docker.com/r/oetiker/znapzend/)
 
 ZnapZend is a ZFS centric backup tool to create snapshots and send them
 to backup locations. It relies on the ZFS tools snapshot, send and receive
@@ -24,8 +26,8 @@ the command is targeted at one dataset and impacts it and all its children,
 allowing to get a consistent point-in-time set of snapshots across multiple
 datasets.
 
-Complilation Inztructionz
--------------------------
+Compilation Inztructionz
+------------------------
 
 If your distribution does not provide a packaged version of znapzend, or if
 you want to get a custom-made copy of znapzend, you will need a compiler and
@@ -53,10 +55,10 @@ get them from the command line (Terminal app) with:
 With that in place you can now utter:
 
 ```sh
-wget https://github.com/oetiker/znapzend/releases/download/v0.19.0/znapzend-0.19.0.tar.gz
-tar zxvf znapzend-0.19.0.tar.gz
-cd znapzend-0.19.0
-./configure --prefix=/opt/znapzend-0.19.0
+wget https://github.com/oetiker/znapzend/releases/download/v0.19.2/znapzend-0.19.2.tar.gz
+tar zxvf znapzend-0.19.2.tar.gz
+cd znapzend-0.19.2
+./configure --prefix=/opt/znapzend-0.19.2
 ```
 
 If configure finds anything noteworthy, it will tell you about it.  If any
@@ -72,7 +74,7 @@ Optionally (but recommended) put symbolic links to the installed binaries in the
 system PATH.
 
 ```sh
-for x in /opt/znapzend-0.19.0/bin/*; do ln -s $x /usr/local/bin; done
+for x in /opt/znapzend-0.19.2/bin/*; do ln -s $x /usr/local/bin; done
 ```
 
 Packages
@@ -166,6 +168,32 @@ In order to allow a non-privileged user to use it, the following permissions are
 Sending end: destroy,hold,mount,send,snapshot,userprop
 Receiving end: create,mount,receive,userprop
 
+Running in Container
+-----------------
+
+znapzend is also available as docker container image. It needs to be a privileged
+container depending on permissions.
+
+```sh
+docker run -d --name znapzend --device /dev/zfs --privileged oetiker/znapzend:master
+```
+
+To configure znapzend, run in interactive mode:
+```sh
+docker exec -it znapzend /bin/sh
+$ znapzendzetup create ...
+# After exiting, restart znapzend container or send the HUP signal to reload config
+```
+
+By default, znapzend in container runs with `--logto /dev/stdout`. If you wish to add different arguments,
+overwrite them at the end of the command:
+
+```sh
+docker run --name znapzend --device /dev/zfs --privileged oetiker/znapzend:master znapzend --logto /dev/stdout --runonce --debug
+```
+
+Be sure not to daemonize znapzend in the container, as that exits the container immediately.
+
 Troubleshooting
 ---------------
 
@@ -198,4 +226,4 @@ And if you have a contribution, please send a pull request.
 Enjoy!
 
 Dominik Hassler & Tobi Oetiker
-2018-06-19
+2020-03-23

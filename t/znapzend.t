@@ -62,7 +62,14 @@ sub runCommand {
     @ARGV = @_;
 
     eval { main(); };
-    return 0 if $@; # Presumably die() handler caught something
+
+    if ($@) {
+        # Presumably a die() handler caught something
+        print STDERR "EXCEPTION: " . $@ . "\n";
+        return 0;
+    };
+
+    # Return "true" if not failed :)
     1;
 }
 
@@ -92,15 +99,17 @@ throws_ok { runCommand_canThrow(qw(--runonce=nosets) ) } qr/No backup set define
 $ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'} = '1';
 is (runCommand(qw(--runonce=tank/source)), 1, 'znapzend --runonce=tank/source with zend-delay==1');
 is (runCommand(qw(--nodelay --runonce=tank/source)), 1, 'znapzend --runonce=tank/source with zend-delay==1 and --nodelay (should ignore the plan setting)');
-undef $ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'};
+$ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'} = undef;
 
 # Try an invalid string, should ignore and proceed without a delay
 $ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'} = ' qwe ';
 # TODO : Find a way to check stderr for qr/Option 'zend-delay' has an invalid value/
 is (runCommand(qw(--runonce=tank/source)),
     1, 'znapzend --runonce=tank/source with zend-delay==" qwe " complains but survives');
-undef $ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'};
+$ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'} = undef;
 
+is (runCommand(qw(--runonce)), 1, 'znapzend runonce without dataset specified succeeds (should find all backup plans)');
+is (runCommand(qw(--runonce=)), 1, 'znapzend runonce with empty dataset == without dataset specified succeeds (should find all backup plans)');
 is (runCommand(qw(--runonce=tank -r)), 1, 'znapzend runonce recursing from a dataset without plan (pool root) succeeds');
 
 is (runCommand(qw(--inherited --runonce=tank/source/child)), 1, 'znapzend runonce of a dataset with only an inherited plan succeeds with --inherited flag');
@@ -111,10 +120,32 @@ is (runCommand(qw(--inherited --recursive --runonce=tank)), 1, 'znapzend runonce
 is (runCommand(qw(--inherited --runonce=tank)), 0, 'znapzend runonce of a dataset without a plan fails also with --inherited flag');
 is (runCommand(qw(--recursive --runonce=tank/source/child)), 0, 'znapzend runonce of a dataset with only an inherited plan fails with only --recursive flag and without --inherited');
 is (runCommand(qw(--runonce=tank/source/child)), 0, 'znapzend runonce of a dataset with only an inherited plan fails without --inherit flag');
+is (runCommand(qw(--runonce=tank/dest-disabled)), 1, 'cover znapzend runonce of a dataset with original backup plan and a disabled destination - does not fail');
+
+# TODO: Add handling and testing for inherited-config datasets with a locally defined bits of the backup plan, e.g. disabled destinations?
+#is (runCommand(qw(--inherited --runonce=tank/source/dest-disabled)), 0, 'cover znapzend runonce of a dataset with inherited backup plan and a disabled destination - such mixing is not supported at the moment');
+
+# Valid and invalid variants of forced snapshot name
+is (runCommand(qw(--runonce=tank/source --forcedSnapshotSuffix=manualsnap)), 1, 'znapzend --runonce=tank/source --forcedSnapshotSuffix=manualsnap succeeds');
+#is (runCommand(qw(--runonce --forcedSnapshotSuffix=@manualsnap)), 1, 'znapzend --runonce --forcedSnapshotSuffix=@manualsnap succeeds (removes leading @)');
+is (runCommand(qw(--runonce=tank/source --forcedSnapshotSuffix=@manualsnap)), 1, 'znapzend --runonce=tank/source --forcedSnapshotSuffix=@manualsnap succeeds (removes leading @)');
+
+is (runCommand(qw(--runonce=tank/source --forcedSnapshotSuffix=manual@snap)), 0, 'znapzend --runonce=tank/source --forcedSnapshotSuffix=manual@snap fails (invalid chars in string)');
+is (runCommand(qw(--runonce=tank/source), '--forcedSnapshotSuffix=manual snap'), 0, 'znapzend --runonce=tank/source --forcedSnapshotSuffix=manual" "snap fails (invalid chars in string)');
+### SKIPPED : This one gets failed by arg processing routines in a way that test program is killed
+#is (runCommand(qw(--runonce=tank/source --forcedSnapshotSuffix=)), 0, 'znapzend --runonce=tank/source --forcedSnapshotSuffix= fails (empty snapname)');
+#throws_ok { runCommand_canThrow(qw(--runonce=tank/source --forcedSnapshotSuffix=) ) } qr/Option forcedSnapshotSuffix requires an argument/,
+#      'znapzend --runonce=tank/source --forcedSnapshotSuffix= fails (empty snapname)';
+is (runCommand(qw(--runonce=tank/source), '--forcedSnapshotSuffix= '), 0, 'znapzend --runonce=tank/source --forcedSnapshotSuffix=" " fails (snapname becomes empty after chomp)');
+is (runCommand(qw(--forcedSnapshotSuffix=manualsnap)), 0, 'znapzend --forcedSnapshotSuffix=manualsnap fails (not in runonce mode)');
 
 # Series of tests over usual tank/source with different options
 is (runCommand(qw(--runonce=tank/source), '--features=oracleMode,recvu,compressed'),
     1, 'znapzend --features=oracleMode,recvu,compressed --runonce=tank/source succeeds');
+is (runCommand(qw(--runonce=tank/source), '--features=skipIntermediates'),
+    1, 'znapzend --features=skipIntermediates --runonce=tank/source succeeds');
+is (runCommand(qw(--runonce=tank/source -i -I), '--features=skipIntermediates'),
+    1, 'znapzend --features=skipIntermediates --runonce=tank/source -i -I succeeds (should complain about both opposing flags used)');
 
 # Coverage for various failure codepaths
 $ENV{'ZNAPZENDTEST_ZFS_GET_DST0PRECMD_FAIL'} = '1';
@@ -153,6 +184,30 @@ is (runCommand(qw(--runonce=tank/source --autoCreation)), 1, 'znapzend --autoCre
 $ENV{'ZNAPZENDTEST_ZFS_FAIL_create'} = '1';
 is (runCommand(qw(--runonce=tank/source --autoCreation)), 0, 'znapzend --autoCreation --runonce=tank/source with a failed ZFS create command - fails');
 $ENV{'ZNAPZENDTEST_ZFS_FAIL_create'} = undef;
+
+is (runCommand(qw(--runonce=tank/source), '--features=zfsGetType'),
+    1, 'znapzend --features=zfsGetType --runonce=tank/source succeeds with new ZFS');
+is (runCommand(qw(--inherited --runonce=tank/source/child --features=zfsGetType)),
+    1, 'znapzend --inherited --features=zfsGetType --runonce=tank/source/child succeeds with new ZFS');
+$ENV{'ZNAPZENDTEST_ZFS_GET_TYPE_UNHANDLED'} = '1';
+is (runCommand(qw(--runonce=tank/source), '--features=zfsGetType'),
+    0, 'znapzend --features=zfsGetType --runonce=tank/source fails with old ZFS');
+$ENV{'ZNAPZENDTEST_ZFS_GET_TYPE_UNHANDLED'} = undef;
+undef $ENV{'ZNAPZENDTEST_ZFS_GET_TYPE_UNHANDLED'};
+
+# Cover another codepath for ZFS that lists snapshots by default
+$ENV{'ZNAPZENDTEST_ZPOOL_DEFAULT_listsnapshots'} = 'on';
+is (runCommand(qw(--runonce=tank/source), '--features=zfsGetType'),
+    1, 'znapzend --features=zfsGetType --runonce=tank/source succeeds with new ZFS when it lists snapshots');
+is (runCommand(qw(--runonce=tank/source)),
+    1, 'znapzend --runonce=tank/source succeeds with new ZFS when it lists snapshots');
+is (runCommand(qw(--inherited --recursive --runonce=tank/source/child --features=zfsGetType)),
+    1, 'znapzend --inherited --recursive --features=zfsGetType --runonce=tank/source/child succeeds with new ZFS when it lists snapshots');
+$ENV{'ZNAPZENDTEST_ZFS_GET_TYPE_UNHANDLED'} = '1';
+is (runCommand(qw(--runonce=tank/source), '--features=zfsGetType'),
+    0, 'znapzend --features=zfsGetType --runonce=tank/source fails with old ZFS when it lists snapshots');
+$ENV{'ZNAPZENDTEST_ZFS_GET_TYPE_UNHANDLED'} = undef;
+$ENV{'ZNAPZENDTEST_ZPOOL_DEFAULT_listsnapshots'} = undef;
 
 # Do not test after daemonize, to avoid conflicts
 is (runCommand_canThrow(qw(--daemonize --debug),'--features=oracleMode,recvu',

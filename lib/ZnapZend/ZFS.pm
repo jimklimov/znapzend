@@ -12,6 +12,8 @@ has nodestroy       => sub { 1 };
 has oracleMode      => sub { 0 };
 has recvu           => sub { 0 };
 has compressed      => sub { 0 };
+has sendRaw         => sub { 0 };
+has skipIntermediates => sub { 0 };
 has lowmemRecurse   => sub { 0 };
 has zfsGetType      => sub { 0 };
 has rootExec        => sub { q{} };
@@ -87,6 +89,9 @@ my $scrubZpool = sub {
 
 ### public methods ###
 sub dataSetExists {
+    # Note: Despite the "dataset" in the name, this routine only asks about
+    # the "live datasets" (filesystem,volume) and not snapshots which are
+    # also a type of dataset in ZFS terminology. See snapshotExists() below.
     my $self = shift;
     my $dataSet = shift;
     my $remote;
@@ -132,6 +137,9 @@ sub snapshotExists {
 }
 
 sub listDataSets {
+    # Note: Despite the "dataset" in the name, this routine only asks about
+    # the "live datasets" (filesystem,volume) and not snapshots which are
+    # also a type of dataset in ZFS terminology. See listSnapshots() below.
     my $self = shift;
     my $remote = shift;
     my $rootDataSets = shift; # May be not passed, or may be a string, or an array of strings
@@ -264,8 +272,9 @@ sub createSnapshot {
     Mojo::Exception->throw("ERROR: cannot create snapshot $dataSet");
 }
 
-# known limitation: snapshots from subdatasets have to be destroyed individually
 sub destroySnapshots {
+    # known limitation: snapshots from subdatasets have to be
+    # destroyed individually on some ZFS implementations
     my $self = shift;
     my @toDestroy = ref($_[0]) eq "ARRAY" ? @{$_[0]} : ($_[0]);
     my %toDestroy;
@@ -344,7 +353,9 @@ sub sendRecvSnapshots {
     my $mbufferSize = shift;
     my $snapFilter = $_[0] || qr/.*/;
     my $recvOpt = $self->recvu ? '-uF' : '-F';
+    my $incrOpt = $self->skipIntermediates ? '-i' : '-I';
     my @sendOpt = $self->compressed ? qw(-Lce) : ();
+    push @sendOpt, '-w' if $self->sendRaw;
 
     my $remote;
     my $mbufferPort;
@@ -369,7 +380,7 @@ sub sendRecvSnapshots {
 
     my @cmd;
     if ($lastCommon){
-        @cmd = ([@{$self->priv}, 'zfs', 'send', @sendOpt, '-I', $lastCommon, $lastSnapshot]);
+        @cmd = ([@{$self->priv}, 'zfs', 'send', @sendOpt, $incrOpt, $lastCommon, $lastSnapshot]);
     }
     else{
         @cmd = ([@{$self->priv}, 'zfs', 'send', @sendOpt, $lastSnapshot]);
@@ -530,7 +541,7 @@ sub getDataSetProperties {
                 }
             }
         } else {
-            # Assume a string, per usual invokation
+            # Assume a string, per usual invocation
             print STDERR "=== getDataSetProperties(): Is string...\n" if $self->debug;
             if ($self->lowmemRecurse && $recurse) {
                 my $listds = $self->listDataSets(undef, $dataSet, $recurse);
@@ -582,6 +593,7 @@ sub getDataSetProperties {
     my %cachedInheritance; # Cache datasets that we know to define znapzend attrs (if inherit mode is used)
     for my $listElem (@list){
         print STDERR "=== getDataSetProperties(): Looking under '$listElem' with "
+            . "zfsGetType='" . $self->zfsGetType . "', "
             . "'$recurse' recursion mode and '$inherit' inheritance mode\n"
             if $self->debug;
         my %properties;
@@ -608,6 +620,12 @@ sub getDataSetProperties {
         my $prevSkipped_srcds = "";
         while (my $prop = <$props>){
             chomp $prop;
+            if ( (!$self->zfsGetType) && ($prop =~ /^\S+@\S+\s/) ) {
+                # Filter away snapshot properties ASAP
+                #print STDERR "=== getDataSetProperties(): SKIP: '$prop' "
+                #    . "because it is a snapshot property\n" if $self->debug;
+                next;
+            }
             # NOTE: This regex assumes the dataset names do not have trailing whitespaces
             my ($srcds, $key, $value, $sourcetype, $tail) = $prop =~ /^(.+)\s+\Q$propertyPrefix\E:(\S+)\s+(.+)\s+(local|inherited from )(.*)$/ or next; ### |received|default|-
             # If we are here, the attribute name (key) is under $propertyPrefix
@@ -632,6 +650,9 @@ sub getDataSetProperties {
                 $srcdsParent =~ s,/[^/]+$,,; # chop off the tail (if any - none on root datasets)
                 if (defined($cachedInheritance{"$srcdsParent\tattr:source"})) {
                     if ($prevSkipped_srcds ne $srcds && $self->debug) {
+                        # Even if we recurse+inherit, we do not need to return
+                        # dozens of backup configurations, one for each child.
+                        # The backup activity would recurse from the topmost.
                         print STDERR "=== getDataSetProperties(): SKIP: '$srcds' "
                             . "because parent config '$srcdsParent' is already listed ("
                             . $cachedInheritance{"$srcdsParent\tattr:source"} .")\n";
@@ -712,17 +733,24 @@ sub getDataSetProperties {
                             . "Looking for '$key' under inheritance source "
                             . "'$tail' to see if it is local there\n"
                                 if $self->debug;
-                        # TODO: here and in mock t/zfs, reduce to "-o property,source"
                         my @inh_cmd = (@{$self->priv}, qw(zfs get -H -s local));
                         if ($self->zfsGetType) {
                             push (@inh_cmd, qw(-t), 'filesystem,volume');
                         }
+                        # TODO: here and in mock t/zfs, reduce to "-o name,property,source"
+                        # or even "-o property,source" when zfsGetType is enabled
                         push (@inh_cmd, qw(-o), 'name,property,value,source',
                             'all', $tail);
                         print STDERR '## ' . join(' ', @inh_cmd) . "\n" if $self->debug;
                         open my $inh_props, '-|', @inh_cmd or Mojo::Exception->throw("ERROR: could not execute zfs to get properties from $tail");
                         while (my $inh_prop = <$inh_props>){
                             chomp $inh_prop;
+                            if ( (!$self->zfsGetType) && ($inh_prop =~ /^\S+@\S+\s/) ) {
+                                # Filter away snapshot properties ASAP
+                                #print STDERR "=== getDataSetProperties(): SKIP: inherited '$inh_prop' "
+                                #    . "because it is a snapshot property\n" if $self->debug;
+                                next;
+                            }
                             my ($inh_srcds, $inh_key, $inh_value, $inh_sourcetype, $inh_tail) =
                                 $inh_prop =~ /^(.+)\s+\Q$propertyPrefix\E:(\S+)\s+(.+)\s+(local|inherited from |received|default|-)(.*)$/
                                     or next;
@@ -743,7 +771,23 @@ sub getDataSetProperties {
                     }
                     if (defined($cachedInheritance{$tail_inheritKey}) && 1 == $cachedInheritance{$tail_inheritKey}) {
                         # This attr comes from a local source
-                        $properties{$key} = $value;
+                        if ( $key =~ /^dst_[^_]+$/ ) {
+                            # Rewrite destination dataset name shifted same as
+                            # this inherited source ($srcds) compared to its
+                            # ancestor which the config is inherited from ($tail
+                            # in the currently active sanity-checked conditions).
+                            if ($srcds =~ /^$tail\/(.+)$/) {
+                                print STDERR "=== getDataSetProperties(): Shifting destination name in config for dataset '$srcds' with configuration inherited from '$tail' : after '$value' will append '/$1'\n" if $self->debug;
+                                $properties{$key} = $value . "/" . $1;
+                            } else {
+                                # Abort if we can not decide well (better sadly
+                                # safe than very-sorry). Not sure if we can get
+                                # here... maybe by some zfs clones and promotion?
+                                die "The dataset '$srcds' with configuration inherited from '$tail' does not have the latter as ancestor, can't decide how to shift the destination dataset names";
+                            }
+                        } else {
+                            $properties{$key} = $value;
+                        }
                     }
                 } else {
                     # See some other $props...
@@ -778,6 +822,8 @@ sub setDataSetProperties {
         #don't save source dataset as we know the source from the property location
         #also don't save destination validity flags as they are evaluated 'on demand'
         next if $prop eq 'src' || $prop =~ /^dst_[^_]+_valid$/;
+        next if !defined($prop);
+        next if !defined($properties->{$prop});
 
         my @cmd = (@{$self->priv}, qw(zfs set), "$propertyPrefix:$prop=$properties->{$prop}", $dataSet);
         print STDERR '# ' . join(' ', @cmd) . "\n" if $self->debug;
@@ -912,9 +958,9 @@ sub usedBySnapshots {
         or Mojo::Exception->throw("ERROR: cannot get usedbysnapshot property of $dataSet");
 
     my $usedBySnap = <$prop>;
-    chomp $usedBySnap;
+    chomp $usedBySnap if $usedBySnap;
 
-    return $usedBySnap;
+    return $usedBySnap // 0;
 }
 
 1;
@@ -992,10 +1038,6 @@ lists the last snapshot on source and the last common snapshot an source and des
 
 sends snapshots to a different destination on localhost or a remote host
 
-=head2 sendRecvSnapshotsExec
-
-same as sendRecvSnapshots but calls 'exec'
-
 =head2 getDataSetProperties
 
 gets dataset properties
@@ -1038,7 +1080,7 @@ returns whether scrub is active on zpool or not
 
 =head2 usedBySnapshots
 
-returns the amount of storage space used by snapshots of a sepcific dataset
+returns the amount of storage space used by snapshots of a specific dataset
 
 =head1 COPYRIGHT
 

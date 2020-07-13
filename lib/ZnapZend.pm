@@ -27,6 +27,8 @@ has nodestroy               => sub { 0 };
 has oracleMode              => sub { 0 };
 has recvu                   => sub { 0 };
 has compressed              => sub { 0 };
+has sendRaw                 => sub { 0 };
+has skipIntermediates       => sub { 0 };
 has lowmemRecurse           => sub { 0 };
 has rootExec                => sub { q{} };
 has zfsGetType              => sub { 0 };
@@ -40,6 +42,7 @@ has daemonize               => sub { 0 };
 has loglevel                => sub { q{debug} };
 has logto                   => sub { q{} };
 has pidfile                 => sub { q{} };
+has forcedSnapshotSuffix    => sub { q{} };
 has defaultPidFile          => sub { q{/var/run/znapzend.pid} };
 has terminate               => sub { 0 };
 has autoCreation            => sub { 0 };
@@ -53,6 +56,7 @@ has zConfig => sub {
     my $self = shift;
     ZnapZend::Config->new(debug => $self->debug, noaction => $self->noaction,
                           rootExec => $self->rootExec, timeWarp => $self->timeWarp,
+                          zfsGetType => $self->zfsGetType,
                           zLog => $self->zLog);
 };
 
@@ -61,9 +65,10 @@ has zZfs => sub {
     ZnapZend::ZFS->new(debug => $self->debug, noaction => $self->noaction,
         nodestroy => $self->nodestroy, oracleMode => $self->oracleMode,
         recvu => $self->recvu, connectTimeout => $self->connectTimeout,
-        lowmemRecurse => $self->lowmemRecurse,
+        lowmemRecurse => $self->lowmemRecurse, skipIntermediates => $self->skipIntermediates,
         rootExec => $self->rootExec, zfsGetType => $self->zfsGetType,
-        zLog => $self->zLog, compressed => $self->compressed);
+        zLog => $self->zLog, compressed => $self->compressed,
+        sendRaw => $self->sendRaw);
 };
 
 has zTime => sub { ZnapZend::Time->new(timeWarp=>shift->timeWarp) };
@@ -136,8 +141,8 @@ my $refreshBackupPlans = sub {
     my $dataSet = shift;
 
     $self->zLog->info('refreshing backup plans' .
-	    (defined($dataSet) ? ' for dataset "' . $dataSet . '"' : '') .
-	    ' ...');
+        (defined($dataSet) ? ' for dataset "' . $dataSet . '"' : '') .
+        ' ...');
     $self->backupSets($self->zConfig->getBackupSetEnabled($recurse, $inherit, $dataSet));
 
     ($self->backupSets && @{$self->backupSets})
@@ -151,14 +156,18 @@ my $refreshBackupPlans = sub {
 
             #perform pre-send-command if any
             if ($backupSet->{"dst_$key" . '_precmd'} && $backupSet->{"dst_$key" . '_precmd'} ne 'off'){
-                # set env var for script to use
-                local $ENV{WORKER} = $backupSet->{"dst_$key"} . '-refresh';
-                $self->zLog->info("running pre-send-command for " . $backupSet->{"dst_$key"});
+                if ($backupSet->{"dst_$key" . '_enabled'} && $backupSet->{"dst_$key" . '_enabled'} eq 'off'){
+                    $self->zLog->info("Skipping pre-send-command for disabled destination " . $backupSet->{"dst_$key"});
+                } else {
+                    # set env var for script to use
+                    local $ENV{WORKER} = $backupSet->{"dst_$key"} . '-refresh';
+                    $self->zLog->info("running pre-send-command for " . $backupSet->{"dst_$key"});
 
-                system($backupSet->{"dst_$key" . '_precmd'})
-                    && $self->zLog->warn("command \'" . $backupSet->{"dst_$key" . '_precmd'} . "\' failed");
-                # clean up env var
-                delete $ENV{WORKER};
+                    system($backupSet->{"dst_$key" . '_precmd'})
+                        && $self->zLog->warn("command \'" . $backupSet->{"dst_$key" . '_precmd'} . "\' failed");
+                    # clean up env var
+                    delete $ENV{WORKER};
+                }
             }
         }
     }
@@ -196,8 +205,18 @@ my $refreshBackupPlans = sub {
                 = $self->zTime->backupPlanToHash($backupSet->{"dst_$key" . '_plan'});
         }
         $backupSet->{interval}   = $self->zTime->getInterval($backupSet->{srcPlanHash});
-        $backupSet->{snapFilter} = $self->zTime->getSnapshotFilter($backupSet->{tsformat});
-        if ($self->since) { $backupSet->{snapFilter} = "(".$backupSet->{snapFilter}."|".$self->since.")"; }
+        $backupSet->{snapCleanFilter} = $self->zTime->getSnapshotFilter($backupSet->{tsformat});
+        if ($self->since) { $backupSet->{snapCleanFilter} = "(".$backupSet->{snapCleanFilter}."|".$self->since.")"; }
+        # Due to support of possible intermediate snapshots named outside the
+        # generated configured pattern (tsformat), to send (and not destroy on
+        # destination) the arbitrary names, and find last common ones properly,
+        # we should match all snap names here and there.
+        $backupSet->{snapSendFilter} = qr/.*/;
+#        $backupSet->{snapSendFilter} = $backupSet->{snapCleanFilter};
+#        if (defined($self->forcedSnapshotSuffix) && $self->forcedSnapshotSuffix ne '') {
+#            # TODO : Should this include ^ (or ^.*@) and $ boundaries?
+#            #$backupSet->{snapSendFilter} = '(' . $backupSet->{snapSendFilter} . '|' . $self->forcedSnapshotSuffix . ')';
+#        }
         $backupSet->{UTC}        = $self->zTime->useUTC($backupSet->{tsformat});
         $self->zLog->info("found a valid backup plan for $backupSet->{src}...");
     }
@@ -209,14 +228,18 @@ my $refreshBackupPlans = sub {
 
             #perform post-send-command if any
             if ($backupSet->{"dst_$key" . '_pstcmd'} && $backupSet->{"dst_$key" . '_pstcmd'} ne 'off'){
-                # set env var for script to use
-                local $ENV{WORKER} = $backupSet->{"dst_$key"} . '-refresh';
-                $self->zLog->info("running post-send-command for " . $backupSet->{"dst_$key"});
+                if ($backupSet->{"dst_$key" . '_enabled'} && $backupSet->{"dst_$key" . '_enabled'} eq 'off'){
+                    $self->zLog->info("Skipping post-send-command for disabled destination " . $backupSet->{"dst_$key"});
+                } else {
+                    # set env var for script to use
+                    local $ENV{WORKER} = $backupSet->{"dst_$key"} . '-refresh';
+                    $self->zLog->info("running post-send-command for " . $backupSet->{"dst_$key"});
 
-                system($backupSet->{"dst_$key" . '_pstcmd'})
-                    && $self->zLog->warn("command \'" . $backupSet->{"dst_$key" . '_pstcmd'} . "\' failed");
-                # clean up env var
-                delete $ENV{WORKER};
+                    system($backupSet->{"dst_$key" . '_pstcmd'})
+                        && $self->zLog->warn("command \'" . $backupSet->{"dst_$key" . '_pstcmd'} . "\' failed");
+                    # clean up env var
+                    delete $ENV{WORKER};
+                }
             }
         }
     }
@@ -232,14 +255,14 @@ my $sendRecvCleanup = sub {
 
     if ($self->nodelay && $backupSet->{zend_delay}) {
         warn "CLI option --nodelay was requested, so ignoring backup plan option 'zend-delay' (was $backupSet->{zend_delay}) on backupSet $backupSet->{src}";
-        undef $backupSet->{zend_delay};
+        $backupSet->{zend_delay} = undef;
     }
 
-    if ($backupSet->{zend_delay}) {
+    if (defined($backupSet->{zend_delay})) {
         chomp $backupSet->{zend_delay};
         if (!($backupSet->{zend_delay} =~ /^\d+$/)) {
-            warn "Backup plan option 'zend-delay' has an invalid value (not a number) on backupSet $backupSet->{src}, ignored";
-            undef $backupSet->{zend_delay};
+            warn "Backup plan option 'zend-delay' has an invalid value ('$backupSet->{zend_delay}' is not a number) on backupSet $backupSet->{src}, ignored";
+            $backupSet->{zend_delay} = undef;
         } else {
             if($backupSet->{zend_delay} > 0) {
                 $self->zLog->info("waiting $backupSet->{zend_delay} seconds before sending snaps on backupSet $backupSet->{src}...");
@@ -263,6 +286,17 @@ my $sendRecvCleanup = sub {
     for my $dst (sort grep { /^dst_[^_]+$/ } keys %$backupSet){
         my ($key) = $dst =~ /dst_([^_]+)$/;
         my $thisSendFailed = 0; # Track if we don't want THIS destination cleaned up
+
+        #allow users to disable some destinations (e.g. reserved/templated
+        #backup plan config items, or known broken targets) without deleting
+        #them outright. Note it is likely that the common (automatic) snapshots
+        #between source and that destination would disappear over time, making
+        #incremental sync impossible at some point in the future.
+        if ($backupSet->{"dst_$key" . '_enabled'} && $backupSet->{"dst_$key" . '_enabled'} eq 'off'){
+            $self->zLog->info("Skipping disabled destination " . $backupSet->{"dst_$key"}
+                . ". Note that you would likely need to recreate the backup data tree there");
+            next;
+        }
 
         #check destination for pre-send-command
         if ($backupSet->{"dst_$key" . '_precmd'} && $backupSet->{"dst_$key" . '_precmd'} ne 'off'){
@@ -328,17 +362,17 @@ my $sendRecvCleanup = sub {
                 eval {
                     local $SIG{__DIE__};
                     $self->zZfs->sendRecvSnapshots($srcDataSet, $dstDataSet,
-                        $backupSet->{mbuffer}, $backupSet->{mbuffer_size}, $backupSet->{snapFilter});
+                        $backupSet->{mbuffer}, $backupSet->{mbuffer_size}, $backupSet->{snapSendFilter});
                 };
-                if ($@){
+                if (my $err = $@){
                     $thisSendFailed = 1;
-                    if (blessed $@ && $@->isa('Mojo::Exception')){
-                        $self->zLog->warn($@->message);
-                        push (@sendFailed, $@->message);
+                    if (blessed $err && $err->isa('Mojo::Exception')){
+                        $self->zLog->warn($err->message);
+                        push (@sendFailed, $err->message);
                     }
                     else{
-                        $self->zLog->warn($@);
-                        push (@sendFailed, $@);
+                        $self->zLog->warn($err);
+                        push (@sendFailed, $err);
                     }
                 }
             }
@@ -356,7 +390,7 @@ my $sendRecvCleanup = sub {
             # operations - so one destroy operation takes ages...
             # but hundreds of queued operations take the same time
             # and are all committed at once.
-            @snapshots = @{$self->zZfs->listSnapshots($backupSet->{$dst}, $backupSet->{snapFilter})};
+            @snapshots = @{$self->zZfs->listSnapshots($backupSet->{$dst}, $backupSet->{snapCleanFilter})};
             $toDestroy = $self->zTime->getSnapshotsToDestroy(\@snapshots,
                          $backupSet->{"dst$key" . 'PlanHash'}, $backupSet->{tsformat}, $timeStamp, $self->since);
 
@@ -387,7 +421,7 @@ my $sendRecvCleanup = sub {
             next if ($backupSet->{recursive} eq 'on' && $dstDataSet eq $backupSet->{$dst});
 
             # cleanup according to backup schedule
-            @snapshots = @{$self->zZfs->listSnapshots($dstDataSet, $backupSet->{snapFilter})};
+            @snapshots = @{$self->zZfs->listSnapshots($dstDataSet, $backupSet->{snapCleanFilter})};
             $toDestroy = $self->zTime->getSnapshotsToDestroy(\@snapshots,
                          $backupSet->{"dst$key" . 'PlanHash'}, $backupSet->{tsformat}, $timeStamp, $self->since);
 
@@ -441,7 +475,7 @@ my $sendRecvCleanup = sub {
             # but hundreds of queued operations take the same time
             # and are all committed at once.
 
-            @snapshots = @{$self->zZfs->listSnapshots($backupSet->{src}, $backupSet->{snapFilter})};
+            @snapshots = @{$self->zZfs->listSnapshots($backupSet->{src}, $backupSet->{snapCleanFilter})};
             $toDestroy = $self->zTime->getSnapshotsToDestroy(\@snapshots,
                          $backupSet->{srcPlanHash}, $backupSet->{tsformat}, $timeStamp, $self->since);
 
@@ -470,7 +504,7 @@ my $sendRecvCleanup = sub {
         for my $srcDataSet (@$srcSubDataSets){
             next if ($backupSet->{recursive} eq 'on' && $srcDataSet eq $backupSet->{src});
 
-            @snapshots = @{$self->zZfs->listSnapshots($srcDataSet, $backupSet->{snapFilter})};
+            @snapshots = @{$self->zZfs->listSnapshots($srcDataSet, $backupSet->{snapCleanFilter})};
             $toDestroy = $self->zTime->getSnapshotsToDestroy(\@snapshots,
                          $backupSet->{srcPlanHash}, $backupSet->{tsformat}, $timeStamp, $self->since);
 
@@ -508,7 +542,20 @@ my $createSnapshot = sub {
     #no HUP handler in child
     $SIG{HUP} = 'IGNORE';
 
-    my $snapshotSuffix = $self->zTime->createSnapshotTime($timeStamp, $backupSet->{tsformat});
+    my $snapshotSuffix;
+    if (defined($self->forcedSnapshotSuffix) && $self->forcedSnapshotSuffix ne '') {
+        $self->zLog->warn("requesting manually specified snapshot suffix '@" . $self->forcedSnapshotSuffix ."'");
+        $snapshotSuffix = $self->forcedSnapshotSuffix;
+    } else {
+        $snapshotSuffix = $self->zTime->createSnapshotTime($timeStamp, $backupSet->{tsformat});
+    }
+    # Basic sanity/security check (e.g. don't let the user pass extra
+    # keywords to zfs cli using bad forcedSnapshotSuffix option or
+    # backup plan config patterns)
+    if ($snapshotSuffix =~ /[@\s\"\'\`#\$]/) { ### # ` and $ to try and avoid shell escaping
+        die ("snapshot suffix '$snapshotSuffix' contains invalid characters\n");
+    }
+
     my $snapshotName = $backupSet->{src} . '@'. $snapshotSuffix;
 
     #set env variables for pre and post scripts use
@@ -561,7 +608,7 @@ my $createSnapshot = sub {
 
             # for each dataset: if the property "enabled" is set to "off", set the
             # newly created snapshot for removal
-            my @dataSetsExplicitelyDisabled = ();
+            my @dataSetsExplicitlyDisabled = ();
             for my $dataSet (@dataSetList){
 
                 # get the value for org.znapzend property
@@ -574,15 +621,15 @@ my $createSnapshot = sub {
                 $prop = <$prop> || "on";
                 chomp($prop);
                 if ( $prop eq 'off' ) {
-                    push(@dataSetsExplicitelyDisabled, $dataSet . '@' . $snapshotSuffix);
+                    push(@dataSetsExplicitlyDisabled, $dataSet . '@' . $snapshotSuffix);
                 }
             }
 
             # remove the snapshots previously marked
             # removal here is non-recursive to allow for fine-grained control
-            if ( @dataSetsExplicitelyDisabled ){
-               $self->zLog->info("Requesting removal of marked datasets: ". join( ", ", @dataSetsExplicitelyDisabled));
-               $self->zZfs->destroySnapshots(@dataSetsExplicitelyDisabled, 0);
+            if ( @dataSetsExplicitlyDisabled ){
+               $self->zLog->info("Requesting removal of marked datasets: ". join( ", ", @dataSetsExplicitlyDisabled));
+               $self->zZfs->destroySnapshots(@dataSetsExplicitlyDisabled, 0);
            }
         }
     }

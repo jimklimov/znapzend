@@ -118,7 +118,10 @@ sub main {
 ### RM_COMM_4_TEST ###  # remove ### RM_COMM_4_TEST ### comments for testing purpose.
 ### RM_COMM_4_TEST ###  $ZNAPZEND_TESTING = 1;
 
-    defined $mainOpt or pod2usage(1);
+    if (!defined $mainOpt) {
+        pod2usage(-exitval => 'NOEXIT');
+        die ("ERROR: Main option was not provided\n");
+    }
 
     Getopt::Long::Configure(qw(posix_default no_ignore_case pass_through));
     GetOptions($opts, @ROOT_EXEC_OPTIONS) or exit 1;
@@ -208,7 +211,10 @@ sub main {
         GetOptions($opts, @ROOT_EXEC_OPTIONS, qw(dst=s)) or exit 1;
 
         $opts->{src} = pop @ARGV;
-        defined $opts->{src} or pod2usage(1);
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: source argument for option $mainOpt was not provided\n");
+        }
 
         if ($opts->{dst}){
             $zConfig->deleteBackupDestination($opts->{src}, 'dst_' . $opts->{dst});
@@ -313,7 +319,11 @@ sub main {
     };
     /^enable$/ && do {
         $opts->{src} = pop @ARGV;
-        defined $opts->{src} or pod2usage(1);
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: source argument for option $mainOpt was not provided\n");
+        }
+
         $zConfig->enableBackupSet($opts->{src})
             or die "ERROR: cannot enable backup config for $opts->{src}. Did you create it?\n";
 
@@ -321,9 +331,44 @@ sub main {
     };
     /^disable$/ && do {
         $opts->{src} = pop @ARGV;
-        defined $opts->{src} or pod2usage(1);
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: source argument for option $mainOpt was not provided\n");
+        }
         $zConfig->disableBackupSet($opts->{src})
             or die "ERROR: cannot disable backup config for $opts->{src}. Did you create it?\n";
+
+        last;
+    };
+    /^enable-dst$/ && do {
+        $opts->{dst} = pop @ARGV;
+        $opts->{src} = pop @ARGV;
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: source argument for option $mainOpt was not provided\n");
+        }
+        if (!defined $opts->{dst}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: destination argument for option $mainOpt was not provided\n");
+        }
+        $zConfig->enableBackupSetDst($opts->{src}, $opts->{dst})
+            or die "ERROR: cannot enable backup config for $opts->{src} destination $opts->{dst}. Did you create this config?\n";
+
+        last;
+    };
+    /^disable-dst$/ && do {
+        $opts->{dst} = pop @ARGV;
+        $opts->{src} = pop @ARGV;
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: source argument for option $mainOpt was not provided\n");
+        }
+        if (!defined $opts->{dst}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: destination argument for option $mainOpt was not provided\n");
+        }
+        $zConfig->disableBackupSetDst($opts->{src}, $opts->{dst})
+            or die "ERROR: cannot disable backup config for $opts->{src} destination $opts->{dst}. Did you create this config?\n";
 
         last;
     };
@@ -343,7 +388,10 @@ sub main {
     };
     /^export$/ && do {
         $opts->{src} = pop @ARGV;
-        defined $opts->{src} or pod2usage(1);
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: source argument for option $mainOpt was not provided\n");
+        }
         # TODO: support --recursive? Does not make much sense "as is" for import then
 
         my $backupSets;
@@ -417,7 +465,10 @@ sub main {
         last;
     };
         #main argument invalid
-        pod2usage(1);
+        if (!defined $opts->{src}) {
+            pod2usage(-exitval => 'NOEXIT');
+            die ("ERROR: Unsupported main option $mainOpt was provided\n");
+        }
     }
     print STDERR <<NOTE;
 NOTE: if you have modified your configuration, send a HUP signal
@@ -452,41 +503,54 @@ znapzendzetup - znapzend setup utility
 
 =head1 SYNOPSIS
 
-B<znapzendzetup> I<command> [I<options...>]
+B<znapzendzetup> I<command> [I<common-options...>] [I<command-options...>]
 
-where 'command' is one of the following:
+where 'common-options' (must precede command-options) is a mix of the
+following:
 
-    create  [--rootExec={pfexec|sudo}] \
-            [--recursive] [--mbuffer=<path>[:<port>]] [--mbuffersize=<size>] \
+            [--rootExec={pfexec|sudo}] \
+            [--features={x,y,...}] \
+                {lowmemRecurse zfsGetType} \
+            [--debug]
+
+and where 'command' and its unique options is one of the following:
+
+    create  [--recursive] [--mbuffer=<path>[:<port>]] [--mbuffersize=<size>] \
             [--pre-snap-command=<command>] \
             [--post-snap-command=<command>] \
             [--tsformat=<format>] --donotask \
             [--send-delay=<time>] \
             SRC plan dataset \
-            [ DST[:key] plan [[user@]host:]dataset [pre-send-command] [post-send-command] ]
+            [ DST[:key] plan [[user@]host:]dataset
+                [pre-send-command] [post-send-command] ]
 
-    delete  [--rootExec={pfexec|sudo}] [--dst=key] <src_dataset>
+    delete  [--dst=key] <src_dataset>
 
-    edit    [--rootExec={pfexec|sudo}]
-            [--recursive=on|off] [--mbuffer=<path>[:<port>]|off] [--mbuffersize=<size>] \
+    edit    [--recursive=on|off] \
+            [--mbuffer=<path>[:<port>]|off] [--mbuffersize=<size>] \
             [--pre-snap-command=<command>|off] \
             [--post-snap-command=<command>|off] \
             [--tsformat=<format>] --donotask \
             [--send-delay=<time>] \
             SRC [plan] dataset \
-            [ DST:key [plan] [dataset] [pre-send-command|off] [post-send-command|off] ]
+            [ DST:key [plan] [dataset] \
+                [pre-send-command|off] [post-send-command|off] ]
 
-    edit    [--rootExec={pfexec|sudo}] <src_dataset>
+    edit    <src_dataset>
 
-    enable  [--rootExec={pfexec|sudo}] <src_dataset>
+    enable  <src_dataset>
 
-    disable [--rootExec={pfexec|sudo}] <src_dataset>
+    disable <src_dataset>
 
-    list    [--rootExec={pfexec|sudo}] [--recursive] [--inherited] [src_dataset...]
+    enable-dst  <src_dataset> <DST_key>
 
-    export  [--rootExec={pfexec|sudo}] <src_dataset>
+    disable-dst <src_dataset> <DST_key>
 
-    import  [--rootExec={pfexec|sudo}] [--write] [--prop <property>=<value>, [--prop ...] ...]
+    list    [--recursive] [--inherited] [src_dataset...]
+
+    export  <src_dataset>
+
+    import  [--write] [--prop <property>=<value>, [--prop ...] ...]
             <src_dataset> [<prop_dump_file>]
 
     help
@@ -526,8 +590,18 @@ configs one by one.
 
 use 'zfsGetType' if your 'zfs get' supports a '-t' argument for
 filtering by dataset type at all (e.g. one in Solaris 10 does not),
-and lists properties for snapshots by default so there is too much
+AND lists properties for snapshots by default when recursing (e.g.
+the one in Solaris 10u8 already does), so that there is too much
 data to process while searching for backup plans.
+
+If these two conditions apply to your system, the time needed for
+a '--recursive' listing of backup plans can literally differ by
+hundreds of times (depending on the amount of snapshots in that
+dataset tree... and a decent backup plan will ensure you have a
+lot of those), so you would benefit from requesting this feature.
+
+This feature should not impact the default (non- '--recursive')
+listings however.
 
 =back
 
@@ -608,7 +682,7 @@ Specify the path to your copy of the mbuffer utility.
 
 =item B<--mbuffer>=I</usr/bin/mbuffer:31337>
 
-Specifiy the path to your copy of the mbuffer utility and the port used
+Specify the path to your copy of the mbuffer utility and the port used
 on the destination. Caution: znapzend will send the data directly
 from source mbuffer to destination mbuffer, thus data stream is B<not>
 encrypted.

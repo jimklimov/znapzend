@@ -8,6 +8,7 @@ use Text::ParseWords qw(shellwords);
 ### attributes ###
 has debug    => sub { 0 };
 has lowmemRecurse => sub { 0 };
+has zfsGetType => sub { 0 };
 has noaction => sub { 0 };
 has rootExec => sub { q{} };
 has timeWarp => sub { undef };
@@ -31,7 +32,8 @@ has zfs  => sub {
     ZnapZend::ZFS->new(
         rootExec => $self->rootExec,
         debug => $self->debug,
-        lowmemRecurse => $self->lowmemRecurse
+        lowmemRecurse => $self->lowmemRecurse,
+        zfsGetType => $self->zfsGetType
     );
 };
 has time => sub { ZnapZend::Time->new(timeWarp=>shift->timeWarp); };
@@ -321,6 +323,99 @@ sub disableBackupSet {
     if (@{$self->backupSets}){
         my %cfg = %{$self->backupSets->[0]};
         $cfg{enabled} = 'off';
+        $self->setBackupSet(\%cfg);
+
+        return 1;
+    }
+
+    return 0;
+}
+
+sub enableBackupSetDst {
+    my $self = shift;
+    my $dataSet = shift;
+    my $dest = shift;
+    my $recurse = shift; # may be undef
+    my $inherit = shift; # may be undef
+
+    $self->zfs->dataSetExists($dataSet) or die "ERROR: dataset $dataSet does not exist\n";
+
+    $self->backupSets($self->zfs->getDataSetProperties($dataSet, $recurse, $inherit));
+
+    if (@{$self->backupSets}){
+        my %cfg = %{$self->backupSets->[0]};
+
+        if ( !($dest =~ /^dst_[^_]+$/) ) {
+            if ($cfg{'dst_' . $dest}) {
+                # User passed valid key of the destination config,
+                # convert to zfs attribute/perl struct name part
+                $dest = 'dst_' . $dest;
+            } elsif ($dest =~ /^DST:/) {
+                my $desttemp = $dest;
+                $desttemp =~ s/^DST:// ;
+                if ($cfg{'dst_' . $desttemp}) {
+                    # User passed valid key of the destination config,
+                    # convert to zfs attribute/perl struct name part
+                    $dest = 'dst_' . $desttemp;
+                }
+            }
+            # TODO: Else search by value of 'dst_N' as a "(remote@)dataset"
+        }
+
+        if ($cfg{$dest}) {
+            if ($cfg{$dest . '_enabled'}) {
+                $cfg{$dest . '_enabled'} = undef;
+            } else {
+                # Already not set => default is "on"
+                return 1;
+            }
+        } else {
+            die "ERROR: dataset $dataSet backup plan does not have destination $dest\n";
+        }
+        $self->setBackupSet(\%cfg);
+
+        return 1;
+    }
+
+    return 0;
+}
+
+sub disableBackupSetDst {
+    my $self = shift;
+    my $dataSet = shift;
+    my $dest = shift;
+    my $recurse = shift; # may be undef
+    my $inherit = shift; # may be undef
+
+    $self->zfs->dataSetExists($dataSet) or die "ERROR: dataset $dataSet does not exist\n";
+
+    $self->backupSets($self->zfs->getDataSetProperties($dataSet, $recurse, $inherit));
+
+    if (@{$self->backupSets}){
+        my %cfg = %{$self->backupSets->[0]};
+
+        if ( !($dest =~ /^dst_[^_]+$/) ) {
+            if ($cfg{'dst_' . $dest}) {
+                # User passed valid key of the destination config,
+                # convert to zfs attribute/perl struct name part
+                $dest = 'dst_' . $dest;
+            } elsif ($dest =~ /^DST:/) {
+                my $desttemp = $dest;
+                $desttemp =~ s/^DST:// ;
+                if ($cfg{'dst_' . $desttemp}) {
+                    # User passed valid key of the destination config,
+                    # convert to zfs attribute/perl struct name part
+                    $dest = 'dst_' . $desttemp;
+                }
+            }
+            # TODO: Else search by value of 'dst_N' as a "(remote@)dataset"
+        }
+
+        if ($cfg{$dest}) {
+            $cfg{$dest . '_enabled'} = 'off';
+        } else {
+            die "ERROR: dataset $dataSet backup plan does not have destination $dest\n";
+        }
         $self->setBackupSet(\%cfg);
 
         return 1;
