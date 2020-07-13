@@ -348,7 +348,7 @@ make the original systems data consistent with that on their remote ZFS pool.
 
 Example:
 
-  znapzend --runonce=usbbackup/snapshots --since=20200101-01-finallyMystableSetup
+  znapzend --runonce=rpool/ROOT --since=20200101-01-finallyStableSetup
 
 =item B<--features>=I<feature1>,I<feature2>,...
 
