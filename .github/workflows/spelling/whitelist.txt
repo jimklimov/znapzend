@@ -27,6 +27,7 @@ autoreconf
 autoscrub
 Autotools
 Backend
+backticks
 backupplan
 backupset
 badkey
@@ -129,6 +130,8 @@ Dockerfile
 DOCTYPE
 DOITPROG
 donotask
+dsa
+dsq
 dst
 dstdir
 dstds
@@ -350,6 +353,8 @@ prefork
 PREREQ
 printf
 printsrc
+propname
+propstring
 propval
 psgi
 pstcmd
@@ -360,6 +365,7 @@ qw
 qwe
 RCAPUTO
 README
+recurseparent
 recv
 recvu
 redhat
@@ -390,6 +396,7 @@ SIGHUP
 SIGINT
 SIGKILL
 SIGTERM
+smartmatch
 smf
 snapname
 snapsuffix
@@ -469,6 +476,7 @@ umask
 umontreal
 uncomment
 unconfigured
+UNCONSIDER
 undef
 undef'ed
 Unicode
@@ -503,6 +511,7 @@ workflow
 wu
 www
 wx
+Xproperties
 xargs
 xcode
 xf
@@ -513,8 +522,10 @@ yacc
 Ymd
 yml
 yy
+ZConfig
 zetup
 zfs
+zfsinherit
 zfsutils
 zfsutilsdep
 znap
