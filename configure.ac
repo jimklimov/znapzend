@@ -90,6 +90,7 @@ AC_SUBST(URL_CAT)
 
 # Note: current Mojolicious as of mid-2020 requires even Perl 5.16+
 # Older versions needed 5.10.1+
+# CSW build for Solaris 10 (using perl 5.8.4) used Mojolicious 5.27 (slated for 5.10.1+ but working)
 ac_perl_version="5.16.0"
 
 if test "x$PERL" != "x"; then
@@ -106,7 +107,19 @@ if test "x$PERL" != "x"; then
     $PERL -e "use $ac_perl_version;" >/dev/null 2>&1
     if test $? -ne 0; then
         AC_MSG_RESULT(no);
-        AC_MSG_ERROR(at least version $ac_perl_version is required to run mojolicious at all)
+        AC_MSG_WARN(at least version $ac_perl_version is required to run recent mojolicious)
+
+        # re-check for older distributions minimal support
+        ac_perl_version="5.8.4"
+
+        AC_MSG_CHECKING(for perl version greater than or equal to $ac_perl_version)
+        $PERL -e "use $ac_perl_version;" >/dev/null 2>&1
+        if test $? -ne 0; then
+            AC_MSG_RESULT(no);
+            AC_MSG_ERROR(at least version $ac_perl_version is required to run mojolicious at all)
+        else
+            MOJOLICIOUS_VERSION_CONSTRAINT=", '<= 5.27'"
+        fi
     else
         MOJOLICIOUS_VERSION_CONSTRAINT=", '< 8.44'"
     fi
