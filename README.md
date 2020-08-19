@@ -52,8 +52,32 @@ To also bootstrap on Ubuntu / Debian you may need:
 apt-get install autoconf carton
 ```
 
-* On Solaris you may need the C compiler from Solaris Studio and gnu-make
-since the installed perl version is probably very old.
+* On Solaris 10 you may need the C compiler from Solaris Studio and gnu-make
+since the installed perl version is probably very old and you would likely
+have to build some dependency modules. The GNU make is needed instead of Sun
+make due to syntax differences, e.g.:
+```sh
+:; ./bootstrap.sh
+...
+autoreconf: running: make
+make: Fatal error in reader: Makefile, line 240: Unexpected end of line seen
+autoreconf: make failed with exit status: 1
+
+:; MAKE=gmake ./bootstrap.sh
+...
+autoreconf: running: gmake
+Making all in lib
+...
+```
+You are also advised to configure CPAN and follow the error messages to add
+missing perl modules as they get reported, e.g.:
+```sh
+...
+** Installing Dependencies using Carton install
+Can't locate Module/CoreList.pm in @INC ...
+
+:; perl -MCPAN -e 'install Module::CoreList'
+```
 
 * On OmniOS/SmartOS you will need perl and gnu-make packages.
 
