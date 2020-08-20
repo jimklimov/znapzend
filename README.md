@@ -78,6 +78,15 @@ Can't locate Module/CoreList.pm in @INC ...
 
 :; perl -MCPAN -e 'install Module::CoreList'
 ```
+Alternately, take a look at
+[CSW packaging of perl](https://www.opencsw.org/packages/CSWperl/)
+and its modules, and other dependencies. If you use that implementation,
+you would need to change the shebangs in `znapzend`, `znapzendzetup` and
+`znapzendztatz` scripts to reference it instead of system perl, as:
+```sh
+#!/opt/csw/bin/perl
+###!/usr/bin/env perl
+```
 
 * On OmniOS/SmartOS you will need perl and gnu-make packages.
 
