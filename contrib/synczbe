@@ -219,6 +219,28 @@ if [ "$NSTIPS" = 1 ] && [ "$NDTIPS" = 1 ] ; then
         DR_ZBE="$DR/$DZ"
         optionalDisarmDestZonedProp
 
+        # If the backup pool was not updated for a while, the old history owner
+        # may not have yet the snapshot from which the new owner should appear
+        if ! zfs list "${DR}/${DZ}@${DZO_SNAP}" 2>/dev/null >/dev/null ; then
+            LD="`zfs list -d1 -Honame -tsnapshot -screation -r "${DR}/${DZ}" | zfslist_filter | tail -1`" || LD="" # latest on dst
+            LS="`zfs list -d1 -Honame -tsnapshot -screation -r "${SR}/${DZ}" | zfslist_filter | tail -1`" || LS="" # latest on src
+            LDS="`echo "$LD" | sed 's,^[^@]*@,,'`"
+            LSS="`echo "$LS" | sed 's,^[^@]*@,,'`"
+            if [ -n "$LD" ] && [ -n "$LDS" ] && [ "$LDS" != "${DZO_SNAP}" ]; then
+                echo "First, update dst (currently at '@${LDS}') to have this snapshot to clone from!" >&2
+                echo ":; time zfs send -R -I '$SR/$DZ@$LDS' '$SR/$DZ@${DZO_SNAP}' | mbuffer -m 128M | zfs recv -vue '$DR'"
+                time zfs send -Lce -RI "$SR/$DZ@$LDS" "$SR/$DZ@${DZO_SNAP}" | mbuffer -m 128M | $ZFSW recv -vue "$DR" || exit
+                if [ -n "$LS" ] && [ -n "$LSS" ] && [ "$LSS" != "${DZO_SNAP}" ]; then
+                    echo "...and beyond, to newest src snapshot ('@${LSS}') to have further history in place" >&2
+                    echo ":; time zfs send -R -I '$SR/$DZ@${DZO_SNAP}' '$SR/$DZ@$LSS' | mbuffer -m 128M | zfs recv -vue '$DR'"
+                    time zfs send -Lce -RI "$SR/$DZ@${DZO_SNAP}" "$SR/$DZ@$LSS" | mbuffer -m 128M | $ZFSW recv -vue "$DR" || exit
+                fi
+            else
+                echo "Could not determine the newest snapshot on dst!" >&2
+                false
+            fi || { echo "Phase 1 fail: could not update history of dst" >&2; exit 1; }
+        fi
+
         $ZFSW clone "${DR}/${DZ}@${DZO_SNAP}" "${DR}/${SZ}" \
         && $ZFSW promote "${DR}/${SZ}" \
         || { echo "Phase 1 fail: could not clone/promote" >&2; exit 1; }
