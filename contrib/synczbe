@@ -3,7 +3,7 @@
 # bashisms: $RANDOM is used, and this:
 set -o pipefail
 
-# (C) 2020 by Jim Klimov
+# (C) 2020 - 2021 by Jim Klimov
 # PoC for: https://github.com/oetiker/znapzend/issues/503
 
 # Warning: no code support for now to manage rootfs datasets with children!
@@ -24,7 +24,7 @@ DR="$DRBASE/$SR"
 
 [ -n "${ZFSLIST_REGEX-}" ] && { echo "WARNING: Filtering dataset name discovery by regex: '$ZFSLIST_REGEX'" >&2; } || ZFSLIST_REGEX=""
 zfslist_filter() {
-    # Process the stream from "zfs list ..." to pick onlyl interesting patterns
+    # Process the stream from "zfs list ..." to pick only interesting patterns
     # Primarily aimed at rootfs support where several OSes (failsafes...) may
     # be installed and there are validly several history owners to consider.
     if [ -z "$ZFSLIST_REGEX" ] ; then cat; return; fi
@@ -89,6 +89,7 @@ optionalDisarmDestZonedProp() {
 
         if ! $DR_ZONED_DISARMED && [ "$DR_ZONED_VALUE" = on ]; then
             DR_ZONED_DISARMED=true
+            echo "Disarming zoned property on '$DR' ..." >&2
             $ZFSW set zoned=off "$DR"
 
             # Re-evaluate whether we need to tweak each
@@ -101,6 +102,7 @@ optionalDisarmDestZonedProp() {
         fi
 
         if [ "$DR_ZBE_ZONED_VALUE" = on ]; then
+            echo "Disarming zoned property on '$DR_ZBE' ..." >&2
             DR_ZBE_ZONED_DISARMED=true
             $ZFSW set zoned=off "$DR_ZBE"
         fi
@@ -222,7 +224,9 @@ if [ "$NSTIPS" = 1 ] && [ "$NDTIPS" = 1 ] ; then
         || { echo "Phase 1 fail: could not clone/promote" >&2; exit 1; }
 
         if $DR_ZBE_ZONED_DISARMED ; then
+            echo "Restoring zoned property on $DR/$DZ ..." >&2
             $ZFSW inherit zoned "$DR/$DZ"
+            echo "Restoring zoned property on $DR/$SZ ..." >&2
             $ZFSW inherit zoned "$DR/$SZ"
             DR_ZBE_ZONED_DISARMED=false
             DR_ZBE=""
