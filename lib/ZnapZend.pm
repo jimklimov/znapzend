@@ -185,29 +185,29 @@ my $listDisabledSourceDescendants = sub {
                 # get the value for org.znapzend property
                 my @cmdLE = (@{$self->zZfs->priv}, qw(zfs get -H -s local -o value org.znapzend:enabled), $dataSet);
                 print STDERR '# ' . join(' ', @cmdLE) . "\n" if $self->debug;
-                open my $propLE, '-|', @cmdLE;
+                open my $cmdOutLE, '-|', @cmdLE;
 
                 my @cmdLR = (@{$self->zZfs->priv}, qw(zfs get -H -s local -o value org.znapzend:recursive), $dataSet);
                 print STDERR '# ' . join(' ', @cmdLR) . "\n" if $self->debug;
-                open my $propLR, '-|', @cmdLR;
-                my $propIR;
+                open my $cmdOutLR, '-|', @cmdLR;
 
                 # if the property does not exist, the command will just return.
                 # In this case, use the default determined above.
-                $propLE = <$propLE>; # || $enabled_default;
+                my $propLE = <$cmdOutLE>; # || $enabled_default;
                 if ($propLE) {
                     chomp($propLE);
                 }
 
-                $propLR = <$propLR>;
+                my $propLR = <$cmdOutLR>;
+                my $propIR;
                 if ($propLR) {
                     chomp($propLR);
                 } else {
                     my @cmdIR = (@{$self->zZfs->priv}, qw(zfs get -H -s inherited -o value org.znapzend:recursive), $dataSet);
                     print STDERR '# ' . join(' ', @cmdIR) . "\n" if $self->debug;
-                    open $propIR, '-|', @cmdIR;
+                    open my $cmdOutIR, '-|', @cmdIR;
 
-                    $propIR = <$propIR>;
+                    $propIR = <$cmdOutIR>;
                     if ($propIR) {
                         chomp($propIR);
                     }
@@ -277,15 +277,15 @@ my $listDisabledSourceDescendants = sub {
                         } else {
                             $ancestor = substr($ancestor, 0, $idx);
                         }
-                        if ((!defined($nearestLE)) && defined($explicitEnabled{$ancestor})) {
+                        if ((!defined($nearestLE)) and defined($explicitEnabled{$ancestor})) {
                             $nearestLE = $explicitEnabled{$ancestor};
                             $nearestLEds = $ancestor;
                         }
-                        if ((!defined($nearestLR)) && defined($explicitRecursiveLocal{$ancestor})) {
+                        if ((!defined($nearestLR)) and defined($explicitRecursiveLocal{$ancestor})) {
                             $nearestLR = $explicitRecursiveLocal{$ancestor};
                             $nearestLRds = $ancestor;
                         }
-                        if (defined($nearestLE) && defined($nearestLR)) {
+                        if (defined($nearestLE) and defined($nearestLR)) {
                             last;
                         }
                         if ($idx < 1 || $ancestor eq $dataSet) {
@@ -298,18 +298,18 @@ my $listDisabledSourceDescendants = sub {
                         # Got something, is it "on" or "off", is recursion involved?
                         if (defined($nearestLR)) {
                             # Both properties are locally defined in some ancestor(s)
-                            if ($nearestLE eq "off" && $nearestLR eq "on" && $nearestLEds eq $nearestLRds) {
+                            if ($nearestLE eq "off" and $nearestLR eq "on" and $nearestLEds eq $nearestLRds) {
                                 # An ancestor defines both enabled==off and recursive==on
                                 # explicitly, and is the nearest one to define such things.
                                 $isDisabled = 1;
                             }
                             # else enabled=on, or recursive=off, or not set in same dataset
-                            elsif ($nearestLE eq "on" && $nearestLR eq "on" && $nearestLEds eq $nearestLRds) {
+                            elsif ($nearestLE eq "on" and $nearestLR eq "on" and $nearestLEds eq $nearestLRds) {
                                 # logical inheritance of "enabled=on"
                                 $isDisabled = -1;
                             }
                             # else enabled=on, or recursive=off, or not set in same dataset
-                            elsif ($nearestLE eq "on" && $nearestLR eq "off" && $nearestLEds eq $nearestLRds) {
+                            elsif ($nearestLE eq "on" and $nearestLR eq "off" and $nearestLEds eq $nearestLRds) {
                                 # logical inheritance of "enabled=..." from parent of that
                                 # ancestor because its own "enabled=on" is not recursive
                                 my $ancestor2 = $nearestLEds;
@@ -325,7 +325,7 @@ my $listDisabledSourceDescendants = sub {
                                     }
                                 }
                             }
-                            elsif ($nearestLE eq "on" && defined($propIR) && $propIR eq "on") {
+                            elsif ($nearestLE eq "on" and defined($propIR) and $propIR eq "on") {
                                 # zfs-inheritance of "enabled=on"
                                 $isDisabled = -1;
                             }
@@ -343,7 +343,6 @@ my $listDisabledSourceDescendants = sub {
                     }
                 }
 
-                ###if ((defined($propLE) && $propLE eq 'off') || (!(defined($propLE)) && $enabled_default eq 'off')) {
                 $self->zLog->debug("=== $dataSet snapshotting: isDisabled=$isDisabled (" . ($isDisabled==1 ? "known-disabled" : ($isDisabled==-1 ? "known-enabled" : "uncertain")) . ")") if $self->debug;
                 if ($isDisabled == 1) {
                     push(@dataSetsExplicitlyDisabled, $dataSet);

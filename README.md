@@ -13,18 +13,64 @@ to do its work. It has the built-in ability to manage both local snapshots
 as well as remote copies by thinning them out as time progresses.
 
 The ZnapZend configuration is stored as properties in the ZFS filesystem
-itself.
+itself. Keep in mind that while this only regards *local* ZFS properties
+of each configured dataset (not "inherited", not "received"), there is
+some domain-specific handling of recursion for certain settings based on
+presence and value of an `org.znapzend:recursive` property.
 
 Note that while recursive configurations are well supported to set up
 backup and retention policies for a whole dataset subtree under the dataset
 to which you have applied explicit configuration, at this time pruning of
-such trees ("I want every dataset under var except var/tmp") is not supported.
+such trees ("I want every dataset under var except var/tmp") is experimental:
+it works, but there may be rough edges which would require more development.
+
 You probably do not want to enable ZnapZend against the root datasets of your
 pools due to that, but would have to be more fine-grained in your setup.
 This is consistent with (and due to) usage of recursive ZFS snapshots, where
 the command is targeted at one dataset and impacts it and all its children,
 allowing to get a consistent point-in-time set of snapshots across multiple
 datasets.
+
+That said, for several years ZnapZend supports setting a local ZFS property
+`org.znapzend:enabled=off` (and only it) in datasets which descend from the
+one with a full backup retention schedule configuration (which in turn sets
+that its descendants should be handled per `org.znapzend:recursive=off`),
+and then exactly these "not-enabled" datasets with `enabled=off` setting
+would not be tracked with a long-term history locally or remotely.
+
+> **_NOTE:_**  Implementation-wise, snapshots of the dataset with a full
+> backup retention schedule configuration are made recursively so as to be
+> a reliable atomic operation. Subsequently snapshots for "not-enabled"
+> datasets are pruned. Different ZnapZend versions varied about sending
+> such snapshots to a remote destination (e.g. as part of a recursive ZFS
+> send stream) and pruning them there afterwards, or avoiding such sending
+> operations.
+>
+> An important take-away is that temporarily there may be a storage and
+> traffic cost associated with "not-enabled" dataset snapshots, and that
+> their creation and deletion is separated by time: if the host reboots
+> (or ZnapZend process is interrupted otherwise) at the wrong moment,
+> such snapshots may linger indefinitely and "unexpectedly" consume disk
+> space for their uniquely referenced blocks.
+
+Current ZnapZend releases extend this support with an ability to also set
+a local ZFS property `org.znapzend:recursive=on` in such datasets (so there
+would be two properties -- to enable/disable and to recurse that), with the
+effect that whole sub-trees of ZFS datasets can be excluded from ZnapZend
+retention handling with one configuration in their common ancestor dataset
+(previously this would require `enabled=off` in each excluded dataset).
+
+This behavior can be useful, for example, on CI build hosts, where you would
+generally enable backups of `rpool/home` but would exclude the location for
+discardable bulk data like build roots or caches in the worker account's home.
+
+> **_NOTE:_**  Technically, the code allows to further set `enabled=on` in
+> certain sub-datasets of the not-enabled tree to re-enable snapshot tracking
+> for that dataset (maybe recursively to its descendants), but this feature
+> has not yet seen much use and feedback in real-life situations. It may be
+> possible that you would have to pre-create the parent datasets (disabled
+> on source) to receive regular backups from ZnapZend on remote destinations,
+> etc.
 
 Compilation and Installation from source Inztructionz
 -----------------------------------------------------
