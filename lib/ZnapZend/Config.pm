@@ -192,6 +192,7 @@ my $checkBackupSets = sub {
         }
         if (!($backupSet->{src_mbuffer})) {
             # Do not leave loose ends after all
+            $self->zLog->info("WARNING: property 'src_mbuffer' not set on backup for " . $backupSet->{src} . ", defaulting to 'off'");
             $backupSet->{src_mbuffer} = 'off';
         }
         if (!exists($backupSet->{src_mbuffer_size}) or !($backupSet->{src_mbuffer_size})) {
