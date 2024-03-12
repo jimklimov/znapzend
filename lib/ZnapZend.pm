@@ -656,7 +656,8 @@ my $sendRecvCleanup = sub {
             }
 
             my $srcDataSetDisabled = (grep (/^\Q$srcDataSet\E$/, @dataSetsExplicitlyDisabled));
-            $self->zLog->debug('sending snapshots from ' . $srcDataSet . ' to ' . $dstDataSet . ($srcDataSetDisabled ? ": not enabled, should be skipped" : ""));
+            $self->zLog->debug('sending snapshots from ' . $srcDataSet . ' to ' . $dstDataSet .
+                ($srcDataSetDisabled ? ": not enabled, skipped" : ""));
             if ($srcDataSetDisabled) {
                 next;
             }
