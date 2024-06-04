@@ -15,6 +15,8 @@ jobs:
             version: 10
           - distribution: debian
             version: 11
+          - distribution: debian
+            version: 12
           - distribution: ubuntu
             version: 18.04
           - distribution: ubuntu
@@ -43,7 +45,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: thirdparty
-          key: ${{ matrix.distribution }}-cpan-${{ matrix.version }}-${{ hashFiles('cpanfile', '*/cpanfile', 'Makefile.am', '*/Makefile.am') }}
+          key: ${{ matrix.distribution }}-cpan-${{ matrix.version }}-${{ hashFiles('cpanfile.common', '*/cpanfile', 'Makefile.am', '*/Makefile.am') }}
       - name: Build package
         id: build_package
         run: bash build_deb.sh ${{ matrix.distribution }} ${{ matrix.version }}
