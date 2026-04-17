@@ -23,6 +23,7 @@ has mandProperties => sub {
     {
         enabled       => 'on|off',
         recursive     => 'on|off',
+        synczbe       => 'on|off',
         src           => '###dataset###',
         src_plan      => '###backupplan###',
         tsformat      => '###tsformat###',

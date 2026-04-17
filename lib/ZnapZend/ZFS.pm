@@ -200,6 +200,33 @@ sub dataSetExists {
     return grep { $dataSet eq $_ } @dataSets;
 }
 
+sub getDataSetOrigin {
+    # Unlike many other methods nearby, this one returns undef (not 0) in case
+    # of either bad request or lack of origin (not set, reported by zfs as '-').
+    # Otherwise returns a string (snapshot relevant in that pool, original or
+    # backup -- note that they may differ in views on which dataset is 'origin'
+    # and which is a clone; `zfs promote` changes that easily).
+    my $self = shift;
+    my $dataSet = shift;
+    my $remote;
+
+    #just in case if someone asks to check '';
+    return undef if !$dataSet;
+
+    ($remote, $dataSet) = $splitHostDataSet->($dataSet);
+    my @ssh = $self->$buildRemote($remote, [@{$self->priv}, qw(zfs get -H -o value origin), $dataSet]);
+
+    print STDERR '# ' . join(' ', @ssh) . "\n" if $self->debug;
+    open my $origin_fh, '-|', @ssh
+        or Mojo::Exception->throw('ERROR: cannot get dataset origin'
+            . ($remote ? " on $remote" : ''));
+
+    my $origin = <$origin_fh>;
+    chomp($origin) if $origin;
+
+    return (defined($origin) && $origin ne '-') ? ($remote ? "$remote:" : '') . $origin : undef;
+}
+
 sub snapshotExists {
     my $self = shift;
     # Note: this is a fully qualified name of dataset@snapshot ZFS object,
@@ -629,9 +656,17 @@ sub sendRecvSnapshots {
     my $allowDestRollback = shift // undef;
     if (!defined($allowDestRollback)) { $allowDestRollback = (!$self->sendRaw && !$self->forbidDestRollback) ; }
 
+    # Synchronize automated branching and promotion of ZFS Boot Environments?
+    my $synczbe = shift // 'off';
+
     my @recvOpt = $self->recvu ? qw(-u) : ();
     push @recvOpt, '-F' if $allowDestRollback;
-    my $incrOpt = $self->skipIntermediates ? '-i' : '-I';
+
+    # It is really important to NOT skipIntermediates on such dataset trees
+    # (naming patterns from OS life-cycle tools or manual intervention likely
+    # differ from znapzend patterns, not in the least to be safe from cleanup)!
+    my $incrOpt = ($synczbe ne 'on' && $self->skipIntermediates) ? '-i' : '-I';
+
     my @sendOpt = $self->compressed ? qw(-Lce) : ();
     push @sendOpt, '-w' if $self->sendRaw;
     push @recvOpt, '-s' if $self->resume;
@@ -665,7 +700,9 @@ sub sendRecvSnapshots {
         $dstName,               $dstDataSet,
         $dstName . '_synced',   1
         );
-    #nothing to do if no snapshot exists on source or if last common snapshot is last snapshot on source
+
+    # Nothing to do if no snapshot exists on source, or if the last
+    # common snapshot is already the last snapshot on source:
     return 1 if !$lastSnapshot;
     if (defined $lastCommon && ($lastSnapshot eq $lastCommon)){
         $self->setSnapshotProperties($lastCommon, \%snapshotSynced);
@@ -674,6 +711,84 @@ sub sendRecvSnapshots {
 
     # If snapshots do exist on destination, check whether there is
     # no *common* snapshot, as this will cause zfs send/recv to fail:
+    if (!$lastCommon && $synczbe eq 'on') {
+        # Note: if $origin is defined, this is a dataset on the
+        # same (non-remote?) source pool as our source dataset:
+        my $srcDataSet_origin = $self->getDataSetOrigin($srcDataSet);
+        if ($srcDataSet_origin && $self->snapshotExists($srcDataSet_origin)) {
+            $self->zLog->debug("sendRecvSnapshots(): synczbe=on: found origin $srcDataSet_origin on source for $srcDataSet");
+
+            # Check if origin (dataset@snap) exists on destination too?
+            my $srcDataSet_origin_snapname = $srcDataSet_origin;
+            $srcDataSet_origin_snapname =~ s/^.*\@//;
+            my $srcDataSet_origin_ds = $srcDataSet_origin;
+            $srcDataSet_origin_ds =~ s/\@.*$//;
+
+            ### TOTHINK:
+            # If the source is a clone, we might want to check if its parent's
+            # equivalent on destination exists.
+            # But ZnapZend doesn't know where the parent was replicated to.
+            # Often, it is in the same parent dataset on destination.
+            # If $srcDataSet_origin_ds is a parent of $srcDataSet, we can try
+            # to find it under dstDataSet's parent.
+
+            # Just in case, be sure to not have any $remote_src in the equation
+            # (should be a local pool):
+            ### my ($remote_src, $srcDataSetPath) = $splitHostDataSet->($srcDataSet);
+            ### if ($srcDataSetPath =~ /^\Q$srcDataSet_origin_ds\E/) {
+            ###      # Not very likely for clones which are usually siblings or elsewhere
+            ### }
+
+            # FIXME: Follow renaming rules to convert $srcDataSet_origin_ds
+            # to what it would be replicated to on dst).
+            # FIXME: Handle initial clone of such tree (or does `zfs send -R` suffice?)
+
+            # NOTE: $dstDataSet(@snapname) values may start with $remote:
+            my $dst_origin_snap = $dstDataSet . '@' . $srcDataSet_origin_snapname;
+            if ($self->snapshotExists($dst_origin_snap)) {
+                # The 'origin' property contains the full path on the *source*.
+                # If we are replicating src/A to dst/B, and src/A has origin src/P@s,
+                # in the simplest case we can expect dst/P@s to exist if we want to
+                # use it as an incremental base.
+                # If we are here, the (maybe intermediate) snapshot is available
+                # on destination under same name , so `zfs promote` did not happen
+                # to change the apparent owners of dataset histories:
+                $self->zLog->debug("sendRecvSnapshots(): synczbe=on: found origin snapshot $dst_origin_snap on destination");
+                $lastCommon = $srcDataSet_origin;
+
+                # If replica of the origin is not available as a last/intermediate
+                # snapshot, we would need to send it over if it is newer than the
+                # last snapshot on dst, or backtrack via mostRecentCommonSnapshot()
+                # from 'origin' on src to start the clone's history from an agreeable
+                # point on dst.
+            } else {
+                # Maybe the origin dataset name is different on destination?
+                # For example, a new rootfs was `zfs promote`'d (so an old rootfs
+                # is now a clone on source), but the backup destination last knew
+                # about the old rootfs as the history owner.
+
+                # Usually znapzend replicates to a different path.
+                # But wait, typically we want to replicate the WHOLE tree.
+                # If src/P is also replicated to dst/PP, then we should look for dst/PP@s.
+                # This is getting complicated.
+
+                # Simplified: if the snapshot $srcDataSet_origin exists on source,
+                # and if we can find it on destination (perhaps under the same name?
+                # or we assume it was replicated to its own destination), we can use it.
+
+                # Let's try to see if $srcDataSet_origin (full name) exists on destination.
+                # This might happen if destination is another pool on the same host,
+                # or if the user has a similar structure on the remote.
+                if ($self->snapshotExists(($remote ? "$remote:" : "") . $srcDataSet_origin)) {
+                     $self->zLog->debug("sendRecvSnapshots(): found origin snapshot $srcDataSet_origin on destination");
+                     $lastCommon = $srcDataSet_origin;
+                } else {
+                    Mojo::Exception->throw("TDD: sendRecvSnapshots(): could not find origin snapshot for equivalent of $srcDataSet on destination");
+                }
+            }
+        }
+    }
+
     if (!$lastCommon and $dstSnapCount) {
         if ($allowDestRollback == 2) {
             # Asked to enforce if needed... is needed now
@@ -718,6 +833,76 @@ sub sendRecvSnapshots {
     }
     else{
         @cmd = ([@{$self->priv}, 'zfs', 'send', @sendOpt, $lastSnapshot]);
+    }
+
+    # If we are using synczbe and we found a common ancestor that
+    # is NOT on the destination dataset itself, but exists elsewhere
+    # on the destination pool, we might need a clone and promote:
+    if (!$self->dataSetExists($dstDataSet) && $synczbe eq 'on' && $lastCommon && $lastCommon =~ /\@/) {
+        # Re-evaluate, in case something changed; rely on freshest possible data:
+        my $srcDataSet_origin = $self->getDataSetOrigin($srcDataSet);
+        if ($srcDataSet_origin && $srcDataSet_origin eq $lastCommon) {
+            # Source is a clone of $lastCommon.
+            # Find where $lastCommon is on the destination.
+            my $dst_base_snap = undef;
+
+            # 1. Check if it's at the same full path on remote
+            if ($self->snapshotExists(($remote ? "$remote:" : "") . $lastCommon)) {
+                $dst_base_snap = $lastCommon;
+            } else {
+                # 2. Check if it's under the same relative path on remote (handled by snapshotExists check earlier)
+                # For now let's assume it was found and set to $lastCommon
+                ### $dst_base_snap = $lastCommon;
+            }
+
+            if ($dst_base_snap) {
+                $self->zLog->debug("sendRecvSnapshots(): creating clone $dstDataSet from $dst_base_snap");
+                my @ssh_clone = $self->$buildRemote($remote, [@{$self->priv}, 'zfs', 'clone', $dst_base_snap, $dstDataSetPath]);
+                print STDERR '# ' . ($self->noaction ? "WOULD # " : "" ) . join(' ', @ssh_clone) . "\n" if $self->debug;
+                if (!$self->noaction) {
+                    system(@ssh_clone) == 0 or Mojo::Exception->throw("ERROR: cannot clone $dst_base_snap to $dstDataSetPath");
+                }
+
+                # Now that it's cloned, we can send incremental changes to it.
+                # Since it's a clone of $lastCommon, it already HAS $lastCommon.
+                # But wait, if it's a fresh clone, it's identical to $lastCommon.
+                # If there are newer snapshots on source, we send them.
+                # If $lastSnapshot is $lastCommon, we are already done.
+                if ($lastSnapshot eq $lastCommon) {
+                    return 1;
+                }
+            } else {
+                Mojo::Exception->throw("TDD: sendRecvSnapshots(): dstDataSet did not exist yet, could not find which origin to clone it from (srcDataSet=$srcDataSet, lastCommon=$lastCommon, srcDataSet_origin=$srcDataSet_origin)");
+            }
+        }
+    }
+
+    # We do not mark the snapshot as synced yet, as it might fail below.
+    # We will do it after successful completion of send/receive.
+
+    # After send/receive, if synczbe is on and source is a clone, we might need to promote
+    if ($synczbe eq 'on') {
+        # Re-evaluate, in case something changed; rely on freshest possible data:
+        my $srcDataSet_origin = $self->getDataSetOrigin($srcDataSet);
+        if ($srcDataSet_origin) {
+            # Check if source is still a clone or was promoted
+            # If it's a clone on source, we might want to promote on destination
+            # but only if it matches the state of the source.
+            # Actually, the user says: "and then promote such clone to match the original backed-up system."
+            # This suggests that if the source dataset is NOT a clone anymore (was promoted),
+            # we should also promote on destination.
+            # If source HAS an origin, it IS a clone.
+            # If it was promoted on source, `origin` property becomes empty.
+
+            # Wait, if `origin` is NOT empty on source, it IS a clone.
+            # If we want to "match the original backed-up system", we should only promote
+            # if the source was promoted.
+
+            # Re-reading: "ZFS based OS workflows often zfs snapshot + zfs clone ... and then zfs promote them to own the snapshot history (origin datasets then are treated as clones)."
+            # So if source was promoted, its origin is now the old dataset.
+            # If we just did an incremental send, and we want the destination to also own the history.
+            Mojo::Exception->throw("TDD: sendRecvSnapshots(): Check if source is still a clone or was promoted");
+        }
     }
 
     # if mbuffer port is set for this destination (or inherited by it
@@ -809,11 +994,32 @@ sub sendRecvSnapshots {
         my $cmd = $shellQuote->(@cmd);
         print STDERR "# " . ($self->noaction ? "WOULD # " : "" ) . "$cmd\n" if $self->debug;
 
-        system($cmd) && Mojo::Exception->throw("ERROR: cannot send snapshots to $dstDataSetPath"
-            . ($remote ? " on $remote" : '')) if !$self->noaction;
+        if (!$self->noaction) {
+            system($cmd) == 0 or Mojo::Exception->throw("ERROR: cannot send snapshots to $dstDataSetPath"
+                . ($remote ? " on $remote" : ''));
+        }
     }
 
+    # If we are here, send succeeded; apply finishing touches:
+    if ($synczbe eq 'on') {
+        # Re-evaluate, in case something changed; rely on freshest possible data:
+        my $srcDataSet_origin = $self->getDataSetOrigin($srcDataSet);
+        if (!$srcDataSet_origin) {
+            # Source is NOT a clone (it was promoted or created fresh).
+            # Check if destination IS a clone.
+            my $dstOrigin = $self->getDataSetOrigin($dstDataSet);
+            if ($dstOrigin) {
+                $self->zLog->debug("sendRecvSnapshots(): synczbe=on, source is NOT a clone but destination is (origin=$dstOrigin). Promoting destination.");
+                my @ssh_promote = $self->$buildRemote($remote, [@{$self->priv}, 'zfs', 'promote', $dstDataSetPath]);
+                print STDERR '# ' . ($self->noaction ? "WOULD # " : "" ) . join(' ', @ssh_promote) . "\n" if $self->debug;
+                if (!$self->noaction) {
+                    system(@ssh_promote) == 0 or Mojo::Exception->throw("ERROR: cannot promote $dstDataSet");
+                }
+            }
+        }
+    }
     $self->setSnapshotProperties($lastSnapshot, \%snapshotSynced);
+
     return 1;
 }
 
