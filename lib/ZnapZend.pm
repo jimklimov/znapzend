@@ -987,7 +987,8 @@ my $sendRecvCleanup = sub {
                         $backupSet->{src_mbuffer}, $backupSet->{src_mbuffer_size},
                         $backupSet->{"dst_$key" . '_mbuffer'}, $backupSet->{"dst_$key" . '_mbuffer_size'},
                         $backupSet->{snapSendFilter}, undef,
-                        ( $backupSet->{"dst_$key" . '_justCreated'} ? 1 : undef )
+                        ( $backupSet->{"dst_$key" . '_justCreated'} ? 1 : undef ),
+                        $backupSet->{synczbe}
                         );
                 };
                 if (my $err = $@){

@@ -191,11 +191,12 @@ sub main {
     for ($mainOpt){
 
     /^create$/ && do {
-        GetOptions($opts, (@ROOT_EXEC_OPTIONS, qw(recursive|r donotask mbuffer=s mbuffersize=s),
+        GetOptions($opts, (@ROOT_EXEC_OPTIONS, qw(recursive|r synczbe donotask mbuffer=s mbuffersize=s),
             qw(tsformat=s pre-snap-command=s post-snap-command=s send-delay=i))) or exit 1;
 
         $cfg{enabled}       = 'on';
         $cfg{recursive}     = $opts->{recursive}            ? 'on' : 'off';
+        $cfg{synczbe}       = $opts->{synczbe}              ? 'on' : 'off';
         $cfg{mbuffer}       = $opts->{mbuffer}             || 'off';
         $cfg{mbuffer_size}  = $opts->{mbuffersize}         || '1G';
         $cfg{tsformat}      = $opts->{tsformat}            || '%Y-%m-%d-%H%M%S';
@@ -300,13 +301,15 @@ sub main {
             last;
         }
 
-        GetOptions($opts, (@ROOT_EXEC_OPTIONS, qw(donotask recursive=s mbuffer=s mbuffersize=s),
+        GetOptions($opts, (@ROOT_EXEC_OPTIONS, qw(donotask recursive=s synczbe=s mbuffer=s mbuffersize=s),
             qw(tsformat=s pre-snap-command=s post-snap-command=s send-delay=i))) or exit 1;
 
         my $backupSet = parseArguments(\@ARGV);
 
         $backupSet->{recursive}     = $opts->{recursive}
             if $opts->{recursive} && $opts->{recursive} =~ /^(?:on|off)$/;
+        $backupSet->{synczbe}       = $opts->{synczbe}
+            if $opts->{synczbe} && $opts->{synczbe} =~ /^(?:on|off)$/;
         $backupSet->{mbuffer}       = $opts->{mbuffer}             if $opts->{mbuffer};
         $backupSet->{mbuffer_size}  = $opts->{mbuffersize}         if $opts->{mbuffersize};
         $backupSet->{tsformat}      = $opts->{tsformat}            if $opts->{tsformat};
@@ -602,7 +605,8 @@ following:
 
 and where 'command' and its unique options is one of the following:
 
-    create  [--recursive] [--mbuffer=<path>[:<port>]] [--mbuffersize=<size>] \
+    create  [--recursive] [--synczbe] \
+            [--mbuffer=<path>[:<port>]] [--mbuffersize=<size>] \
             [--pre-snap-command=<command>] \
             [--post-snap-command=<command>] \
             [--tsformat=<format>] --donotask \
@@ -618,7 +622,7 @@ and where 'command' and its unique options is one of the following:
 
     delete  [--dst=key] <src_dataset>
 
-    edit    [--recursive=on|off] \
+    edit    [--recursive=on|off] [--synczbe=on|off]  \
             [--mbuffer=<path>[:<port>]|off] [--mbuffersize=<size>] \
             [--pre-snap-command=<command>|off] \
             [--post-snap-command=<command>|off] \

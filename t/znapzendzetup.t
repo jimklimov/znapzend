@@ -106,6 +106,11 @@ is (runCommand(qw(create --donotask --tsformat=%Y%m%d-%H%M%S SRC 1h=>10min tank/
 is (runCommand(qw(edit --donotask --tsformat=%Y%m%d-%H%M%S SRC 1h=>10min tank/source),
     qw(DST:0 1h=>10min backup/destination)), 1, 'znapzendzetup edit --donotask');
 
+# synczbe is enabled on the source dataset (implies sending intermediate snapshots)
+is (runCommand(qw(edit --donotask --synczbe=on)), 0, 'znapzendzetup edit --synczbe=on');
+is (runCommand(qw(edit --donotask --synczbe=on tank/source)), 0, 'znapzendzetup edit --synczbe=on');
+is (runCommand(qw(edit --donotask --synczbe=on SRC tank/source)), 1, 'znapzendzetup edit --synczbe=on SRC ...');
+
 is (runCommand(qw(enable tank/source)), 1, 'znapzendzetup enable');
 
 is (runCommand(qw(disable tank/source)), 1, 'znapzendzetup disable');
