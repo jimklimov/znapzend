@@ -76,7 +76,8 @@ has zZfs => sub {
         lowmemRecurse => $self->lowmemRecurse, skipIntermediates => $self->skipIntermediates,
         rootExec => $self->rootExec, zfsGetType => $self->zfsGetType,
         zLog => $self->zLog, compressed => $self->compressed,
-        sendRaw => $self->sendRaw, forbidDestRollback => $self->forbidDestRollback);
+        sendRaw => $self->sendRaw, forbidDestRollback => $self->forbidDestRollback,
+        getDstDataSetForSrcDataSet => $self->getDstDataSetForSrcDataSet);
 };
 
 has zTime => sub { ZnapZend::Time->new(timeWarp=>shift->timeWarp) };
@@ -120,6 +121,47 @@ has zLog => sub {
 };
 
 ### private methods ###
+has getDstDataSetForSrcDataSetInBackupSet => sub {
+    my $self = shift;
+    my $srcDataSet = shift;
+    my $dst = shift;    # backup destination tag
+    my $backupSet = shift;
+    my $checkValid = shift // 0;
+
+    # FIXME? Bail if unexpected pattern?
+    my ($key) = $dst =~ /dst_([^_]+)$/;
+
+    if ($backupSet->{src} ne $srcDataSet && $backupSet->{src} !~ /^\Q$srcDataSet\/\E/) {
+        # Wrong backupSet: starts at some other src
+        return undef;
+    }
+
+    if ($backupSet->{$checkValid ? "dst_$key" . '_valid' : $dst}) {
+        my $dstDataSet = $srcDataSet;
+        $dstDataSet =~ s/^\Q$backupSet->{src}\E/$backupSet->{$dst}/;
+        return $dstDataSet;
+    }
+
+    # Correct backupSet (per src hit), lacks THAT dst: bail out
+    return undef;
+};
+
+has getDstDataSetForSrcDataSet => sub {
+    my $self = shift;
+    my $srcDataSet = shift;
+    my $dst = shift;    # backup destination tag
+    my $checkValid = shift // 0;
+
+    for my $backupSet (@{$self->backupSets}) {
+        my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet, $checkValid);
+        if (defined($dstDataSet)) {
+            return $dstDataSet;
+        }
+    }
+
+    return undef;
+};
+
 my $killThemAll = sub {
     my $self = shift;
 
@@ -640,8 +682,7 @@ my $sendRecvCleanup = sub {
         #from being snapshot/sent by setting property "org.znapzend:enabled"
         #to "off" on them
         for my $srcDataSet (@$srcSubDataSets){
-            my $dstDataSet = $srcDataSet;
-            $dstDataSet =~ s/^\Q$backupSet->{src}\E/$backupSet->{$dst}/;
+            my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
 
             my $autoCreation = $self->autoCreation;
             if (!defined($autoCreation)) {
@@ -1024,8 +1065,7 @@ my $sendRecvCleanup = sub {
 
         #cleanup children of current destination
         for my $srcDataSet (@$srcSubDataSets){
-            my $dstDataSet = $srcDataSet;
-            $dstDataSet =~ s/^\Q$backupSet->{src}\E/$backupSet->{$dst}/;
+            my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
 
             next if ($backupSet->{recursive} eq 'on' && $dstDataSet eq $backupSet->{$dst});
 
@@ -1162,9 +1202,9 @@ my $sendRecvCleanup = sub {
             if (scalar($toDestroy) > 0) {
                 # Check if any death-rowed snapshots need protection
                 for my $dst (sort grep { /^dst_[^_]+$/ } keys %$backupSet){
-                    my $dstDataSet = $backupSet->{src};
-                    $dstDataSet =~ s/^\Q$backupSet->{src}\E/$backupSet->{$dst}/;
+                    my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($backupSet->{src}, $dst, $backupSet);
                     my $recentCommon = $self->zZfs->mostRecentCommonSnapshot($backupSet->{src}, $dstDataSet, $dst, $backupSet->{snapCleanFilter}, ($backupSet->{recursive} eq 'on'), undef );
+
                     if ($recentCommon) {
                         $self->zLog->debug('not cleaning up source ' . $recentCommon . ' recursively because it is needed by ' . $dstDataSet) if $self->debug;
                         #print STDERR "SOURCE RECURSIVE CLEAN: BEFORE: " . Dumper($toDestroy) if $self->debug;
@@ -1248,9 +1288,9 @@ my $sendRecvCleanup = sub {
             # (including offline destinations for which last-known sync
             # snapshot name is saved in properties of the source policy)
             for my $dst (sort grep { /^dst_[^_]+$/ } keys %$backupSet){
-                my $dstDataSet = $srcDataSet;
-                $dstDataSet =~ s/^\Q$backupSet->{src}\E/$backupSet->{$dst}/;
+                my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
                 my $recentCommon = $self->zZfs->mostRecentCommonSnapshot($srcDataSet, $dstDataSet, $dst, $backupSet->{snapCleanFilter}, undef, undef);
+
                 if ($recentCommon) {
                     $self->zLog->debug('not cleaning up source ' . $recentCommon . ' because it is needed by ' . $dstDataSet) if $self->debug;
                     #print STDERR "SOURCE CHILD CLEAN: BEFORE: " . Dumper($toDestroy) if $self->debug;

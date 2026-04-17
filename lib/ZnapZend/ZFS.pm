@@ -35,6 +35,9 @@ has zLog            => sub {
 };
 has priv            => sub { my $self = shift; [$self->rootExec ? split(/ /, $self->rootExec) : ()] };
 
+# Callback, may be populated by ZnapZend.pm making its zZfs field:
+has getDstDataSetForSrcDataSet => sub { return undef; };
+
 ### private functions ###
 my $splitHostDataSet = sub {
     # When troubleshooting, set to 1:
@@ -669,8 +672,8 @@ sub sendRecvSnapshots {
         return 1;
     }
 
-    #check if snapshots exist on destination if there is no common snapshot
-    #as this will cause zfs send/recv to fail
+    # If snapshots do exist on destination, check whether there is
+    # no *common* snapshot, as this will cause zfs send/recv to fail:
     if (!$lastCommon and $dstSnapCount) {
         if ($allowDestRollback == 2) {
             # Asked to enforce if needed... is needed now
