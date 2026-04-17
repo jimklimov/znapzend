@@ -219,6 +219,7 @@ ${prefix}org.znapzend:src            ${srcdsname}${srcsuffix}
 ${prefix}org.znapzend:src_plan       1hours=>10minutes,30minutes=>5minutes,1minutes=>6seconds${srcsuffix}
 ${prefix}org.znapzend:recursive      on${srcsuffix}
 ${prefix}org.znapzend:tsformat       %Y-%m-%d-%H%M%S${srcsuffix}
+${prefix}org.znapzend:synczbe        off${srcsuffix}
 ${prefix}org.znapzend:enabled        ${srcenabled}${srcenabledsuffix}
 ${prefix}org.znapzend:dst_0          backup/${dstdsname}${srcsuffix}
 ${prefix}org.znapzend:dst_a          root\@remote:remote/${dstdsname}${srcsuffix}
@@ -387,7 +388,25 @@ for ($command){
         exit;
     };
 
+    /^promote$/ && do {
+        if ( envval('ZNAPZENDTEST_ZFS_FAIL_promote') ) {
+            print STDERR "failed to promote mock dataset(s)\n";
+            exit 1;
+        }
+        exit;
+    };
+
     /^get$/ && do {
+        if ($ARGSTR =~ / -o value origin/) {
+            my $ds = $ARGV[-1];
+            if (envval("ZNAPZENDTEST_ZFS_ORIGIN_$ds")) {
+                print $ENV{"ZNAPZENDTEST_ZFS_ORIGIN_$ds"} . "\n";
+            } else {
+                print "-\n";
+            }
+            exit;
+        }
+
         #if ($ARGV[6] && $ARGV[6] eq 'usedbysnapshots'){
         if ( $ARGSTR =~ /usedbysnapshots/ ){
             print "10G\n";
