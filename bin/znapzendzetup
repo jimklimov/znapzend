@@ -762,6 +762,15 @@ to the destination). For example, this can be useful to recursively
 backup all home directories starting from B<rpool/export/home> and then
 avoid backing up locations like a certain user's B<.ccache> directory.
 
+An interesting niche option is B<synczbe>, useful for datasets (or trees
+thereof) with operating environments -- main system, containers, maybe
+virtual machine disks. As those environments are upgraded over time,
+many OS workflows are prepared to B<zfs clone> an existing filesystem
+tree, install packages or apply patches into the clone, and B<zfs promote>
+it to become the new state of the system to reboot into. The B<synczbe>
+option allows znapzend to align with such workflow by applying equivalent
+operations to clone and promote datasets on the destination.
+
 =over
 
 =item B<--tsformat>=I<limited-strftime-format>
