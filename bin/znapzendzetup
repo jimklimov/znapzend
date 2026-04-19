@@ -121,7 +121,7 @@ sub parseArguments {
             $state = '';
             next;
         };
-        die "ERROR: don't know what to do with $_. check the syntax\n";
+        die "ERROR: don't know what to do with $_. Check the syntax (did you specify SRC or DST where appropriate?)\n";
     }
 
     #check if we have a valid source as this is crucial
