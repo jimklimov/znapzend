@@ -767,9 +767,13 @@ thereof) with operating environments -- main system, containers, maybe
 virtual machine disks. As those environments are upgraded over time,
 many OS workflows are prepared to B<zfs clone> an existing filesystem
 tree, install packages or apply patches into the clone, and B<zfs promote>
-it to become the new state of the system to reboot into. The B<synczbe>
-option allows znapzend to align with such workflow by applying equivalent
-operations to clone and promote datasets on the destination.
+it to become the new state of the file system (and the new "owner" of the
+snapshot and clone history) to reboot into. The B<synczbe> option allows
+znapzend to align with such workflow by applying equivalent operations
+to clone and promote datasets on the backup destination. It implies that
+B<sendIntermediate> logic is always enabled for these datasets, because
+the snapshot naming patterns of OS tools should not match those created
+and automatically removed by B<znapzend> for usual iterative operations.
 
 =over
 
