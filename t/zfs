@@ -20,6 +20,15 @@ my %dataSets = (
     'tank/anothersource/anotherchild/anewconfig/newcfgdata'        => 'src-inherited',
     'tank/anothersource/disabled'         => 'src-disabled',
     'tank/anothersource/disabled/also'    => 'src-disabled',
+    'tank/ROOT'    => 'src-synczbe',
+    'tank/ROOT@znapzend-auto-2019-11-15T10:30:00Z'    => 'src-synczbe',
+    'tank/ROOT@znapzend-auto-2019-11-16T12:00:00Z'    => 'src-synczbe',
+    'tank/ROOT/zbe-1'                                       => 'src-synczbe-inherited-old-clone',
+    'tank/ROOT/zbe-1@znapzend-auto-2019-11-16T12:00:00Z'    => 'src-synczbe-inherited-old-clone',
+    'tank/ROOT/zbe-2'                                       => 'src-synczbe-inherited-new-promoted',
+    'tank/ROOT/zbe-2@znapzend-auto-2019-11-15T10:30:00Z'    => 'src-synczbe-inherited-new-promoted',
+    'tank/ROOT/zbe-2@znapzend-auto-2019-11-15T23:30:00Z-zbeUpgrade' => 'src-synczbe-inherited-new-promoted',
+    'tank/ROOT/zbe-2@znapzend-auto-2019-11-16T12:00:00Z'    => 'src-synczbe-inherited-new-promoted',
     'backup'             => '',
     'backup/destination' => 'dst',
     'backup/destination/child' => 'dst', # TODO: dst-inherited
@@ -31,7 +40,36 @@ my %dataSets = (
     'remote/destination' => 'dst',
     'remote/destination/child' => 'dst',
     'remote/destination/child/grandchild' => 'dst',
+    'remote/ROOT'    => 'dst-synczbe',
+    'remote/ROOT@znapzend-auto-2019-11-15T10:30:00Z'    => 'src-synczbe',
+    'remote/ROOT/zbe-1'    => 'dst-synczbe-inherited-old' . (
+        envval('ZNAPZENDTEST_ZFS_GET_DST_SYNCZBE_PHASE', '2')
+        ? "-clone" : "-promoted"
+    ),
+    ### 'remote/ROOT/zbe-2'    => 'dst-synczbe-new',
 );
+
+# NOTE: Normally "@zbeUpgrade" pattern would be very different from znapzend
+#  timestamps, but here we take an easy route for predictable sorting.
+if (envval('ZNAPZENDTEST_ZFS_GET_DST_SYNCZBE_PHASE', '2')) {
+    # On remote storage after we replicate the changes,
+    #  zbe-2 is the promoted new owner of snapshot/clone history,
+    #  and older zbe-1 is deemed its clone made from an intermediate snapsnot
+    $dataSets{'remote/ROOT/zbe-1@znapzend-auto-2019-11-16T12:00:00Z'} = 'dst-synczbe-inherited-old-clone';
+    $dataSets{'remote/ROOT/zbe-2'} = 'dst-synczbe-inherited-new-promoted';
+    $dataSets{'remote/ROOT/zbe-2@znapzend-auto-2019-11-15T10:30:00Z'} = 'dst-synczbe-inherited-new-promoted';
+    $dataSets{'remote/ROOT/zbe-2@znapzend-auto-2019-11-15T23:30:00Z-zbeUpgrade'} = 'dst-synczbe-inherited-new-promoted';
+    $dataSets{'remote/ROOT/zbe-2@znapzend-auto-2019-11-16T12:00:00Z'} = 'dst-synczbe-inherited-new-promoted';
+} else {
+    # On remote storage initially (before we replicate the changes),
+    #  zbe-1 is the sole owner of snapshot/clone history (zbe-2 does not exist)
+    $dataSets{'remote/ROOT/zbe-1@znapzend-auto-2019-11-15T10:30:00Z'} = 'dst-synczbe-inherited-old-promoted';
+    if (envval('ZNAPZENDTEST_ZFS_GET_DST_SYNCZBE_PHASE', '1')) {
+        # Intermediate and regular snaps appear on remote zbe-1
+        $dataSets{'remote/ROOT/zbe-1@znapzend-auto-2019-11-15T23:30:00Z-zbeUpgrade'} = 'dst-synczbe-inherited-old-promoted';
+        $dataSets{'remote/ROOT/zbe-1@znapzend-auto-2019-11-16T12:00:00Z'} = 'dst-synczbe-inherited-old-promoted';
+    }
+}
 
 # List explicitly so we know the `zfs` CLI argument is a
 # dataset name from tests, but points to failure codepath
@@ -91,11 +129,11 @@ sub find_attr_source {
     my $attr = shift; # only matters for "enabled" at the moment
 
     if (!defined($srcname) || $srcname eq '') {
-        die "FATAL: zfs mock find_attr_source() got empty/undef srcame";
+        die "FATAL: zfs mock find_attr_source() got empty/undef srcname";
     }
 
     if (!defined($dataSets{"$srcname"})) {
-        die "FATAL: zfs mock find_attr_source() got unlisted srcame '$srcname' (not in dataSets table)";
+        die "FATAL: zfs mock find_attr_source() got unlisted srcname '$srcname' (not in dataSets table)";
         # return undef;
     }
 
@@ -149,7 +187,7 @@ sub print_zfs_get {
     my $dstname = shift;
     my $printsrc = shift;
 
-#print STDERR "=== print_zfs_get() starting with: prefix='$prefix' srcname='$srcname' dstname='$dstname' printsrc='$printsrc'\n";
+print STDERR "=== print_zfs_get() starting with: prefix='$prefix' srcname='$srcname' dstname='$dstname' printsrc='$printsrc'\n";
 
     if ( defined($prefix) ) {
         chomp $prefix;
@@ -209,7 +247,8 @@ sub print_zfs_get {
 #    . ( defined($dataSets{"backup/${dstdsname}"}) ? $dataSets{"backup/${dstdsname}"} : 'UNDEF' )
 #    . "\n";
 
-    print <<"ZFS_GET_END";
+    if (defined ($dataSets{$srcname}) && $dataSets{$srcname} =~ /^src/) {
+        print <<"ZFS_GET_END";
 ${prefix}org.znapzend:dst_0_plan     1hours=>10minutes,30minutes=>5minutes,10minutes=>60seconds${srcsuffix}
 ${prefix}org.znapzend:dst_0_precmd   ${dst0precmd}${srcsuffix}
 ${prefix}org.znapzend:dst_0_pstcmd   ${dst0pstcmd}${srcsuffix}
@@ -230,15 +269,34 @@ ${prefix}org.znapzend:pre_znap_cmd   /bin/echo 'pre znap command'${srcsuffix}
 ${prefix}org.znapzend:post_znap_cmd  /bin/echo 'post znap command'${srcsuffix}
 ZFS_GET_END
 
-    if ( envval('ZNAPZENDTEST_ZFS_GET_ZEND_DELAY') ) {
-        print <<"ZFS_GET_END";
+        if ( envval('ZNAPZENDTEST_ZFS_GET_ZEND_DELAY') ) {
+            print <<"ZFS_GET_END";
 ${prefix}org.znapzend:zend_delay     $ENV{'ZNAPZENDTEST_ZFS_GET_ZEND_DELAY'}${srcsuffix}
 ZFS_GET_END
+        }
+
+        if (defined ($dataSets{"backup/${dstname}"}) && $dataSets{"backup/${dstname}"} eq 'dst-disabled') {
+            print <<"ZFS_GET_END";
+${prefix}org.znapzend:dst_0_enabled  off${srcenabledsuffix_0}
+ZFS_GET_END
+        }
+
+        if ($dataSets{$srcname} =~ /src-synczbe/) {
+            print <<"ZFS_GET_END";
+${prefix}org.znapzend:synczbe   on
+ZFS_GET_END
+        }
     }
 
-    if (defined ($dataSets{"backup/${dstname}"}) && $dataSets{"backup/${dstname}"} eq 'dst-disabled') {
+    if (defined ($dataSets{$srcname}) && $dataSets{$srcname} =~ /-clone/) {
+        my $originDS = $srcdsname;
+        $originDS =~ s/zbe-1/zbe-2/;
         print <<"ZFS_GET_END";
-${prefix}org.znapzend:dst_0_enabled  off${srcenabledsuffix_0}
+${prefix}origin   ${originDS}\@znapzend-auto-2019-11-15T23:30:00Z-zbeUpgrade${srcsuffix}
+ZFS_GET_END
+    } else {
+        print <<"ZFS_GET_END";
+${prefix}origin   -
 ZFS_GET_END
     }
 
@@ -300,15 +358,19 @@ for ($command){
             if (!defined($snapCount) || $snapCount !~ /^\d+$/) {
                 $snapCount = 58; # +2 for src
             }
-            if ($dataSets{$ARGV[-1]} eq 'src') {
+            if ($dataSets{$ARGV[-1]} eq 'src' || $dataSets{$ARGV[-1]} =~ /synczbe/) {
                 $snapCount += 2;
             }
             # Get timestamp rounded to minutes
             my $time = localtime(int(time / 60) * 60 - 3600);
             for (my $i = 0; $i < $snapCount; $i++) {
+                if ($i == ($snapCount - 2) && $dataSets{$ARGV[-1]} =~ /synczbe/) {
+                    print $ARGV[-1] . '@zbeUpgrade' . "\n";
+                }
                 print $ARGV[-1] . '@' . $time->strftime('%Y-%m-%d-%H%M%S') . "\n";
                 $time += 60;
             }
+
             exit;
         }
 
@@ -460,7 +522,7 @@ usage:
         # but somewhat artificially rule out displaying datasets
         # under "backup" that are a pool root and destinations.
         # Real "zfs get" would show these.
-        exit if !( (defined($ARGV[-1]) && exists $dataSets{$ARGV[-1]} && ($dataSets{$ARGV[-1]} =~ /^src/)) || ($ARGSTR =~ / -r /) );
+        exit if !( (defined($ARGV[-1]) && exists $dataSets{$ARGV[-1]} && ($dataSets{$ARGV[-1]} =~ /^(src|dst-synczbe)/)) || ($ARGSTR =~ / -r /) );
 
         # IRL the default actually depends on zpool 'listsnapshots' attribute;
         # these tests assumed an 'off' behavior previously, so they do still.
@@ -509,7 +571,7 @@ usage:
         if (defined($ARGV[-1]) && exists $dataSets{$ARGV[-1]}) {
             $srcds = "$ARGV[-1]";
             $srcdsOrig = $srcds;
-            if ( !($dataSets{$srcds} =~ /^src/) && !$recursive ) {
+            if ( !($dataSets{$srcds} =~ /^(src|dst-synczbe)/) && !$recursive ) {
                 exit;
             }
         } else {
@@ -596,7 +658,7 @@ usage:
             }
         } else {
             ### srcdsOrig!='' OR !($recursive && $srcds ne '')
-            if (   (!$localattr && !$inheritedattr && $dataSets{$srcds} =~ /^src/)
+            if (   (!$localattr && !$inheritedattr && $dataSets{$srcds} =~ /^(src|dst-synczbe)/)
                 || ($localattr && $dataSets{$srcds} eq 'src')
                 || ($inheritedattr && $dataSets{$srcds} eq 'src-inherited')
             ) {
