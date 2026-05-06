@@ -107,8 +107,10 @@ is (runCommand(qw(edit --donotask --tsformat=%Y%m%d-%H%M%S SRC 1h=>10min tank/so
     qw(DST:0 1h=>10min backup/destination)), 1, 'znapzendzetup edit --donotask');
 
 # synczbe is enabled on the source dataset (implies sending intermediate snapshots)
+# WRONG WAYS to use the option:
 is (runCommand(qw(edit --donotask --synczbe=on)), 0, 'znapzendzetup edit --synczbe=on');
 is (runCommand(qw(edit --donotask --synczbe=on tank/source)), 0, 'znapzendzetup edit --synczbe=on');
+# RIGHT ways - part of SRC backup schedule definition:
 is (runCommand(qw(edit --donotask --synczbe=on SRC tank/source)), 1, 'znapzendzetup edit --synczbe=on SRC ...');
 
 is (runCommand(qw(enable tank/source)), 1, 'znapzendzetup enable');
