@@ -137,7 +137,7 @@ sub find_attr_source {
         # return undef;
     }
 
-    if ($dataSets{"$srcname"} eq 'src') {
+    if ($dataSets{"$srcname"} eq 'src' || $dataSets{"$srcname"} eq 'src-synczbe') {
         return 'local';
     }
 
@@ -155,7 +155,7 @@ sub find_attr_source {
         return 'received';
     }
 
-    if ( $dataSets{"$srcname"} =~ /-inherited$/ ) {
+    if ( $dataSets{"$srcname"} =~ /-inherited/ ) {
         my $parentSourceName = $srcname;
         $parentSourceName =~ s,/[^/]+$,, ;
         if (!defined($parentSourceName) || $parentSourceName eq '') {
@@ -283,7 +283,7 @@ ZFS_GET_END
 
         if ($dataSets{$srcname} =~ /src-synczbe/) {
             print <<"ZFS_GET_END";
-${prefix}org.znapzend:synczbe   on
+${prefix}org.znapzend:synczbe   on${srcsuffix}
 ZFS_GET_END
         }
     }
@@ -469,6 +469,10 @@ for ($command){
             my $ds = $ARGV[-1];
             if (envval("ZNAPZENDTEST_ZFS_ORIGIN_$ds")) {
                 print $ENV{"ZNAPZENDTEST_ZFS_ORIGIN_$ds"} . "\n";
+            } elsif (defined($dataSets{$ds}) && $dataSets{$ds} =~ /-clone/) {
+                my $originDS = $ds;
+                $originDS =~ s/zbe-1/zbe-2/;
+                print "${originDS}\@znapzend-auto-2019-11-15T23:30:00Z-zbeUpgrade\n";
             } else {
                 print "-\n";
             }
@@ -609,9 +613,9 @@ usage:
             # Per checks above we know the $prefix is empty or exactly
             # last ARGV item.
 
-            if (   (!$localattr && !$inheritedattr && $dataSets{$srcds} =~ /^src/)
-                || ($localattr && $dataSets{$srcds} eq 'src')
-                || ($inheritedattr && $dataSets{$srcds} eq 'src-inherited')
+            if (   (!$localattr && !$inheritedattr && $dataSets{$srcds} =~ /^(src|dst-synczbe)/)
+                || ($localattr && ($dataSets{$srcds} eq 'src' || $dataSets{$srcds} eq 'src-synczbe'))
+                || ($inheritedattr && $dataSets{$srcds} =~ /-inherited/)
             ) {
                 my $dstds;
                 # TODO: Rectify use of specially handled dataset names
@@ -619,6 +623,8 @@ usage:
                     $dstds = "destination$1";
                 } elsif ($srcds =~ /^tank\/dest-disabled($|\/.*$)/ ) {
                     $dstds = "dest-disabled$1";
+                } elsif ($srcds =~ /^tank\/ROOT($|\/.*$)/ ) {
+                    $dstds = "ROOT$1";
                 } else {
                     $dstds = $srcds;
                 }
@@ -642,12 +648,14 @@ usage:
                         $dstds = "destination$1";
                     } elsif ($childds =~ /^tank\/dest-disabled($|\/.*$)/ ) {
                         $dstds = "dest-disabled$1";
+                    } elsif ($childds =~ /^tank\/ROOT($|\/.*$)/ ) {
+                        $dstds = "ROOT$1";
                     } else {
                         $dstds = $childds;
                     }
-                    if (   (!$localattr && !$inheritedattr && $dataSets{$childds} =~ /^src/)
-                        || ($localattr && $dataSets{$childds} eq 'src')
-                        || ($inheritedattr && $dataSets{$childds} eq 'src-inherited')
+                    if (   (!$localattr && !$inheritedattr && $dataSets{$childds} =~ /^(src|dst-synczbe)/)
+                        || ($localattr && ($dataSets{$childds} eq 'src' || $dataSets{$childds} eq 'src-synczbe'))
+                        || ($inheritedattr && $dataSets{$childds} =~ /-inherited/)
                     ) {
                         if ( ($childds =~ /@/) && ($listsnaps < 1) ) {
                             next;
@@ -659,8 +667,8 @@ usage:
         } else {
             ### srcdsOrig!='' OR !($recursive && $srcds ne '')
             if (   (!$localattr && !$inheritedattr && $dataSets{$srcds} =~ /^(src|dst-synczbe)/)
-                || ($localattr && $dataSets{$srcds} eq 'src')
-                || ($inheritedattr && $dataSets{$srcds} eq 'src-inherited')
+                || ($localattr && ($dataSets{$srcds} eq 'src' || $dataSets{$srcds} eq 'src-synczbe'))
+                || ($inheritedattr && $dataSets{$srcds} =~ /-inherited/)
             ) {
                 my $dstds;
                 # TODO: Rectify use of specially handled dataset names
@@ -668,6 +676,8 @@ usage:
                     $dstds = "destination$1";
                 } elsif ($srcds =~ /^tank\/dest-disabled($|\/.*$)/ ) {
                     $dstds = "dest-disabled$1";
+                } elsif ($srcds =~ /^tank\/ROOT($|\/.*$)/ ) {
+                    $dstds = "ROOT$1";
                 } else {
                     $dstds = $srcds;
                 }

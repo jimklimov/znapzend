@@ -93,6 +93,18 @@ is (runCommand('--help'), 1, 'znapzend help');
 
 is (runCommand(), 1, 'znapzend');
 
+# TODO: Move lower
+# The ZNAPZENDTEST_ZFS_GET_DST_SYNCZBE_PHASE envvar, if defined,
+# will be promoted by the implementation as it progresses through
+# the changes on local and remote ZFS Boot Environment replicas
+# (origins changing, clones appearing),  so the mock `zfs` tool
+# would report data similar to that in the real pools and datasets
+# and their properties at a certain moment in the workflow.
+$ENV{'ZNAPZENDTEST_ZFS_GET_DST_SYNCZBE_PHASE'} = '1';
+is (runCommand(qw(--recursive --runonce=tank/ROOT)), 1, 'znapzend runonce of a ROOT dataset whose child is configured with synczbe succeeds');
+$ENV{'ZNAPZENDTEST_ZFS_GET_DST_SYNCZBE_PHASE'} = undef;
+
+##################################
 throws_ok { runCommand_canThrow(qw(--runonce=nosets) ) } qr/No backup set defined or enabled/,
       'znapzend dies with no backup sets defined or enabled at startup';
 
