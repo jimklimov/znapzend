@@ -77,7 +77,7 @@ has zZfs => sub {
         rootExec => $self->rootExec, zfsGetType => $self->zfsGetType,
         zLog => $self->zLog, compressed => $self->compressed,
         sendRaw => $self->sendRaw, forbidDestRollback => $self->forbidDestRollback,
-        getDstDataSetForSrcDataSet => $self->getDstDataSetForSrcDataSet);
+        getDstDataSetForSrcDataSet => sub { my ($s, $d, $c) = @_; return $self->getDstDataSetForSrcDataSet($s, $d, $c); });
 };
 
 has zTime => sub { ZnapZend::Time->new(timeWarp=>shift->timeWarp) };
@@ -131,7 +131,7 @@ has getDstDataSetForSrcDataSetInBackupSet => sub {
     # FIXME? Bail if unexpected pattern?
     my ($key) = $dst =~ /dst_([^_]+)$/;
 
-    if ($backupSet->{src} ne $srcDataSet && $backupSet->{src} !~ /^\Q$srcDataSet\/\E/) {
+    if ($backupSet->{src} ne $srcDataSet && $srcDataSet !~ /^\Q$backupSet->{src}\/\E/) {
         # Wrong backupSet: starts at some other src
         return undef;
     }
@@ -683,6 +683,12 @@ my $sendRecvCleanup = sub {
         #to "off" on them
         for my $srcDataSet (@$srcSubDataSets){
             my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+            # Guard against accidental ref/OBJECT leakage into the dataset name
+            # (e.g. if a call site mis-ordered arguments earlier):
+            if (ref($dstDataSet)) {
+                $self->zLog->warn('Internal warning: destination dataset resolved to a reference; re-evaluating');
+                $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+            }
 
             my $autoCreation = $self->autoCreation;
             if (!defined($autoCreation)) {
@@ -957,7 +963,8 @@ my $sendRecvCleanup = sub {
                                                 $backupSet->{src_mbuffer}, $backupSet->{src_mbuffer_size},
                                                 $backupSet->{"dst_$key" . '_mbuffer'}, $backupSet->{"dst_$key" . '_mbuffer_size'},
                                                 $backupSet->{snapSendFilter}, $lastSnapshotToSee,
-                                                ( $backupSet->{"dst_$key" . '_justCreated'} ? 1 : ($doPromote > 1 ? $doPromote : undef ) )
+                                                ( $backupSet->{"dst_$key" . '_justCreated'} ? 1 : ($doPromote > 1 ? $doPromote : undef ) ),
+                                                $backupSet->{synczbe}
                                             );
                                     } else {
                                         $self->zLog->debug("sendRecvCleanup() [--since mode]: We considered --since='" . $self->since . "' and did not find reasons to use sendRecvSnapshots() explicitly to make it appear in $dstDataSet");
