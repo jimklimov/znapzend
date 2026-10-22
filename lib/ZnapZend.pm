@@ -67,6 +67,9 @@ has zConfig => sub {
                           zLog => $self->zLog);
 };
 
+# Pre-declare public method
+my $getDstDataSetForSrcDataSet;
+
 has zZfs => sub {
     my $self = shift;
     ZnapZend::ZFS->new(debug => $self->debug, noaction => $self->noaction,
@@ -77,7 +80,7 @@ has zZfs => sub {
         rootExec => $self->rootExec, zfsGetType => $self->zfsGetType,
         zLog => $self->zLog, compressed => $self->compressed,
         sendRaw => $self->sendRaw, forbidDestRollback => $self->forbidDestRollback,
-        getDstDataSetForSrcDataSet => sub { my ($s, $d, $c) = @_; return $self->getDstDataSetForSrcDataSet($s, $d, $c); });
+        getDstDataSetForSrcDataSet => sub { my ($s, $d, $c) = @_; return $self->$getDstDataSetForSrcDataSet($s, $d, $c); });
 };
 
 has zTime => sub { ZnapZend::Time->new(timeWarp=>shift->timeWarp) };
@@ -121,7 +124,7 @@ has zLog => sub {
 };
 
 ### private methods ###
-has getDstDataSetForSrcDataSetInBackupSet => sub {
+my $getDstDataSetForSrcDataSetInBackupSet = sub {
     my $self = shift;
     my $srcDataSet = shift;
     my $dst = shift;    # backup destination tag
@@ -131,29 +134,35 @@ has getDstDataSetForSrcDataSetInBackupSet => sub {
     # FIXME? Bail if unexpected pattern?
     my ($key) = $dst =~ /dst_([^_]+)$/;
 
+    $self->zLog->debug("getDstDataSetForSrcDataSetInBackupSet(): srcDataSet='$srcDataSet', dst='$dst' => key='$key', synczbe=" . ( $backupSet->{synczbe} // 'undef' ) );
+
     if ($backupSet->{src} ne $srcDataSet && $srcDataSet !~ /^\Q$backupSet->{src}\/\E/) {
         # Wrong backupSet: starts at some other src
+        $self->zLog->debug("getDstDataSetForSrcDataSetInBackupSet(): Wrong backupSet: starts at some other src");
         return undef;
     }
 
     if ($backupSet->{$checkValid ? "dst_$key" . '_valid' : $dst}) {
         my $dstDataSet = $srcDataSet;
         $dstDataSet =~ s/^\Q$backupSet->{src}\E/$backupSet->{$dst}/;
+        $self->zLog->debug("getDstDataSetForSrcDataSetInBackupSet(): Found valid destination: '$dstDataSet'");
         return $dstDataSet;
     }
 
     # Correct backupSet (per src hit), lacks THAT dst: bail out
+    $self->zLog->debug("getDstDataSetForSrcDataSetInBackupSet(): Correct backupSet (per src hit), lacks THAT dst: bail out");
     return undef;
 };
 
-has getDstDataSetForSrcDataSet => sub {
+# pre-declared above, no "my" here:
+$getDstDataSetForSrcDataSet = sub {
     my $self = shift;
     my $srcDataSet = shift;
     my $dst = shift;    # backup destination tag
     my $checkValid = shift // 0;
 
     for my $backupSet (@{$self->backupSets}) {
-        my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet, $checkValid);
+        my $dstDataSet = $self->$getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet, $checkValid);
         if (defined($dstDataSet)) {
             return $dstDataSet;
         }
@@ -682,12 +691,19 @@ my $sendRecvCleanup = sub {
         #from being snapshot/sent by setting property "org.znapzend:enabled"
         #to "off" on them
         for my $srcDataSet (@$srcSubDataSets){
-            my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+            if (ref($srcDataSet)) {
+                $self->zLog->warn("Internal warning: source dataset resolved to a reference: srcDataSet='$srcDataSet'");
+                # TOTHINK: Throw exception?
+            }
+            # $self->zLog->debug("sendRecvCleanup(): Requesting getDstDataSetForSrcDataSetInBackupSet() for srcDataSet='$srcDataSet', dst='$dst', backupSet='$backupSet'");
+
+            my $dstDataSet = $self->$getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+
             # Guard against accidental ref/OBJECT leakage into the dataset name
             # (e.g. if a call site mis-ordered arguments earlier):
             if (ref($dstDataSet)) {
-                $self->zLog->warn('Internal warning: destination dataset resolved to a reference; re-evaluating');
-                $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+                $self->zLog->warn("Internal warning: destination dataset resolved to a reference: dstDataSet='$dstDataSet'"); # re-evaluating');
+                # TOTHINK: Throw exception?
             }
 
             my $autoCreation = $self->autoCreation;
@@ -748,6 +764,7 @@ my $sendRecvCleanup = sub {
                         ', skipIntermediates=="' . $self->skipIntermediates . '"' .
                         ', forbidDestRollback=="' . $self->forbidDestRollback . '"' .
                         ', autoCreation=="' . ( $autoCreation ? "true" : "false" ) . '"' .
+                        ', synczbe=="' . ( $backupSet->{synczbe} // 'undef' ) . '"' .
                         ', sendRaw=="' . $self->sendRaw . '"' .
                         ', valid=="' . ( $backupSet->{"dst_$key" . '_valid'} ? "true" : "false" ) . '"' .
                         ', justCreated=="' . ( $backupSet->{"dst_$key" . '_justCreated'} ? "true" : "false" ) . '"'
@@ -1073,7 +1090,7 @@ my $sendRecvCleanup = sub {
 
         #cleanup children of current destination
         for my $srcDataSet (@$srcSubDataSets){
-            my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+            my $dstDataSet = $self->$getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
 
             next if ($backupSet->{recursive} eq 'on' && $dstDataSet eq $backupSet->{$dst});
 
@@ -1210,7 +1227,7 @@ my $sendRecvCleanup = sub {
             if (scalar($toDestroy) > 0) {
                 # Check if any death-rowed snapshots need protection
                 for my $dst (sort grep { /^dst_[^_]+$/ } keys %$backupSet){
-                    my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($backupSet->{src}, $dst, $backupSet);
+                    my $dstDataSet = $self->$getDstDataSetForSrcDataSetInBackupSet($backupSet->{src}, $dst, $backupSet);
                     my $recentCommon = $self->zZfs->mostRecentCommonSnapshot($backupSet->{src}, $dstDataSet, $dst, $backupSet->{snapCleanFilter}, ($backupSet->{recursive} eq 'on'), undef );
 
                     if ($recentCommon) {
@@ -1296,7 +1313,7 @@ my $sendRecvCleanup = sub {
             # (including offline destinations for which last-known sync
             # snapshot name is saved in properties of the source policy)
             for my $dst (sort grep { /^dst_[^_]+$/ } keys %$backupSet){
-                my $dstDataSet = $self->getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
+                my $dstDataSet = $self->$getDstDataSetForSrcDataSetInBackupSet($srcDataSet, $dst, $backupSet);
                 my $recentCommon = $self->zZfs->mostRecentCommonSnapshot($srcDataSet, $dstDataSet, $dst, $backupSet->{snapCleanFilter}, undef, undef);
 
                 if ($recentCommon) {

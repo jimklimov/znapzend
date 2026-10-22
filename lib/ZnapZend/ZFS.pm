@@ -683,15 +683,14 @@ sub sendRecvSnapshots {
     my ($lastSnapshot, $lastCommon, $dstSnapCount)
         = $self->lastAndCommonSnapshots($srcDataSet, $dstDataSet, $snapFilter, $lastSnapshotToSee);
 
-    if (defined($lastSnapshotToSee)) {
-        $self->zLog->debug("sendRecvSnapshots() : " .
-            "for srcDataSet='$srcDataSet' srcDataSet='$srcDataSet' " .
-            "snapFilter='$snapFilter' lastSnapshotToSee='$lastSnapshotToSee' ".
-            "GOT: lastSnapshot='$lastSnapshot' " .
-            "lastCommon=" . ($lastCommon ? "'$lastCommon'" : "undef") . " " .
-            "dstSnapCount='$dstSnapCount'"
-            );
-    }
+    $self->zLog->debug("sendRecvSnapshots() : " .
+        "for srcDataSet='$srcDataSet' srcDataSet='$srcDataSet' " .
+        "snapFilter='" . ($snapFilter // "undef") . "' " .
+        "lastSnapshotToSee='" . ($lastSnapshotToSee // "undef") . "' ".
+        "GOT: lastSnapshot='" . ($lastSnapshot // "undef") . "' " .
+        "lastCommon=" . ($lastCommon // "undef") . " " .
+        "dstSnapCount='" . ($dstSnapCount // "undef") . "'"
+        );
 
     # We would set these source snapshot properties to mark that
     # this snapshot has been delivered to destination, to keep the
